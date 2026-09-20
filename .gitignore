@@ -1,0 +1,19 @@
+# 虛擬環境
+.venv/
+__pycache__/
+*.pyc
+
+# 資料集與衍生檔案：CEDAR 為研究用途授權，不可轉散布；快取由它算出，同樣不入庫
+data/
+
+# 第三方 repo：sigver 請自行 clone（見 README），內含以 GPDS 訓練的權重，限非商業用途
+sigver/
+
+# 產生出來的圖含資料集的簽名影像，不入庫；執行腳本即可重新產生
+*.png
+
+# 模型權重與驗證產出（依 README 步驟自行產生）
+models/
+
+# 本機工具快取
+.impeccable/
