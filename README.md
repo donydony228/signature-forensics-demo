@@ -20,10 +20,10 @@
 
 ## 現況
 
-| 版本 | 狀態 | 說明 |
+| 版本 | 連接埠 | 說明 |
 |---|---|---|
-| **教學版**（`app.py`） | 已完成 | 用來說明整個流程：特徵 → 偏離幾個 σ → 距離門檻 → 二元判定 |
-| **鑑識版**（`forensic_app.py`） | 規劃完成，未實作 | 改為差值向量 + 線性模型，輸出證據強度（likelihood ratio）而非二元判定 |
+| **教學版**（`app.py`） | 8000 | 說明整個流程：特徵 → 偏離幾個 σ → 距離門檻 → 二元判定 |
+| **鑑識版**（`forensic_app.py`） | 8010 | 差值向量 + Elastic Net 線性模型，輸出證據強度（likelihood ratio），不下真偽結論 |
 
 鑑識版的完整設計見 **[docs/SPEC.md](docs/SPEC.md)**。兩個版本的主要差異：
 
@@ -37,11 +37,24 @@
 ```
 兩張簽名圖
   → 前處理：裁到筆跡範圍、等比縮放、Otsu 二值化
-  → 特徵：幾何、方向分布、HOG、LBP 等
+  → 8 族特徵共 3334 維（幾何、方向分布、小波、Radon、GLCM、HOG、LBP、SIFT）
   → 每一維換算成「偏離幾個 σ」
-  → 教學版：距離門檻 ｜ 鑑識版：線性模型 → likelihood ratio
+  → 教學版：距離門檻 ｜ 鑑識版：Elastic Net → 邏輯迴歸校準 → likelihood ratio
   → 拆回具名特徵與熱區圖
 ```
+
+特徵族與維度：
+
+| 族 | 維度 | 內容 |
+|---|---|---|
+| 幾何 | 7 | 寬高比、墨跡密度、質心、整體傾角、筆畫段數、筆畫總長÷高度 |
+| 方向分布 | 10 | 骨架切線方向 8 箱 + 端點數、交叉點數 |
+| 小波 | 10 | 3 層 db2 分解，各子帶能量佔比 |
+| Radon | 36 | 每 5 度一個角度的投影能量佔比 |
+| GLCM | 48 | 6 個統計量 × 2 距離 × 4 角度 |
+| HOG | 2970 | 15×22 格 × 9 方向 |
+| LBP | 250 | 5×5 格 × 10 種模式 |
+| SIFT | 3 | 配對率、平均描述子距離、仿射 RANSAC 一致性（成對計算）|
 
 σ 是「一個人重複簽自己名字時，這個特徵正常會變動多少」。把單位不同的特徵（寬高比約 2、墨跡密度約 0.05）換算成 σ 之後才能互相比較。
 
@@ -77,27 +90,42 @@ bsdtar -xf signatures.rar && rm signatures.rar && cd ..
 # 4.（選用）SigNet 預訓練權重，只有深度特徵對照需要
 .venv/bin/gdown 1l8NFdxSvQSLb2QTv71E6bKcTgvShKPpx -O sigver/models/signet.pth
 
-# 5. 啟動教學版，開 http://127.0.0.1:8000
+# 5. 建特徵快取（教學版只需要不含 SIFT 的部分，約 6 分鐘）
+.venv/bin/python features.py --no-sift
+
+# 6. 啟動教學版，開 http://127.0.0.1:8000
 .venv/bin/python app.py
 ```
 
-第一次執行會對 2640 張圖抽特徵並快取到 `data/`，約需一分鐘。
+鑑識版需要先建特徵快取與訓練模型：
+
+```bash
+.venv/bin/python features.py      # 2640 張抽 8 族特徵（約 30 分鐘，SIFT 佔 80%）
+.venv/bin/python train.py         # 訓練 Elastic Net + 校準 → models/forensic.json
+.venv/bin/python validate.py      # Cllr、Tippett 圖、逐族消融 → validation_report.png
+.venv/bin/python forensic_app.py  # 開 http://127.0.0.1:8010
+```
 
 其他腳本：
 
 ```bash
-.venv/bin/python handcrafted_demo.py   # 印出評估表，產生靜態報告圖
-.venv/bin/python test_app.py           # 端點測試（需先啟動 app.py）
+.venv/bin/python handcrafted_demo.py   # 教學版的評估表與靜態報告圖
+.venv/bin/python test_app.py           # 教學版端點測試（需先啟動 app.py）
 ```
 
 ## 檔案結構
 
 ```
-app.py                 教學版後端（Python 內建 http.server，無框架）
-index.html             教學版前端（單一檔案，無外部函式庫）
-handcrafted_demo.py    特徵計算、CEDAR 校準與評估、報告圖
-signet_demo.py         SigNet 深度特徵對照，以及共用的資料集工具
-test_app.py            端點測試
+features.py            共用：前處理 + 8 族特徵、CEDAR 快取（教學版與鑑識版都 import）
+train.py               鑑識版：配對取樣、Elastic Net、LR 校準 → models/forensic.json
+validate.py            鑑識版：Cllr、Tippett 圖、逐族消融
+forensic_app.py        鑑識版後端（port 8010）
+forensic.html          鑑識版前端
+app.py                 教學版後端（port 8000，Python 內建 http.server，無框架）
+index.html             教學版前端
+handcrafted_demo.py    教學版：CEDAR 評估與靜態報告圖
+signet_demo.py         SigNet 深度特徵對照
+test_app.py            教學版端點測試
 docs/SPEC.md           鑑識版規格
 ```
 

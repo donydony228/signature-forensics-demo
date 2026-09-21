@@ -1,8 +1,7 @@
 <!doctype html>
 <!--
-  鑑識版 UI 樣板：所有數字、簽名筆跡、熱區、對應點都是假資料，不接任何後端。
-  用途是確認前端呈現方式，確認後才依 docs/SPEC.md 實作。
-  簽名是 SVG 合成的筆跡，不使用任何資料集影像。
+  鑑識版前端。由 forensic_app.py 提供服務（port 8010），所有數字來自 /compare。
+  不給真偽結論：輸出 likelihood ratio 與逐項證據分解，由鑑識人員判斷。
 -->
 <html lang="zh-Hant">
 <head>
@@ -25,6 +24,7 @@
     --same-soft: #cde2fb;
     --diff: #d03b3b;        /* 支持不同人 */
     --diff-soft: #f6d3d3;
+    --accent-wash: #eef4fd;
     --warn-bg: #fdf6e3;
     --warn-line: #eda100;
     --radius: 10px;
@@ -39,45 +39,47 @@
   main { max-width: 1120px; margin: 0 auto; padding: 32px 16px 72px; }
   h1 { font-size: 24px; line-height: 1.3; margin: 0 0 4px; }
   h2 { font-size: 15px; margin: 0; }
-  h3 { font-size: 13px; color: var(--ink-2); margin: 18px 0 6px; }
   .lede { color: var(--ink-2); margin: 0; max-width: 62ch; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
   .hint { color: var(--muted); font-size: 13px; margin: 2px 0 12px; }
   .mono { font-variant-numeric: tabular-nums; }
-
-  /* 樣板提示條 */
-  .mock {
-    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-    background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: var(--radius);
-    padding: 12px 16px; margin: 20px 0 24px; font-size: 14px;
-  }
-  .mock strong { font-size: 14px; }
-  .mock .switch { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-  .mock .switch span { color: var(--ink-2); font-size: 13px; }
-  button {
-    font: inherit; border-radius: 8px; padding: 6px 12px;
-    border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); cursor: pointer;
-  }
-  button:hover { border-color: var(--ink-2); }
-  button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
   .ghost { color: var(--muted); font-size: 12px; }
 
-  /* 輸入區 */
-  .inputs { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  /* 輸入 */
+  .inputs { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-top: 24px; }
   @media (max-width: 860px) { .inputs { grid-template-columns: 1fr; } }
-  .specimens { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
-  .specimen { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 6px; }
-  .specimen svg { display: block; width: 100%; height: 52px; }
-  .specimen .cap { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .drop {
-    border: 1.5px dashed var(--line-strong); border-radius: 8px; padding: 10px;
-    display: grid; gap: 8px; place-items: center; color: var(--muted); font-size: 13px;
+    position: relative; border: 1.5px dashed var(--line-strong); border-radius: 8px;
+    min-height: 150px; display: grid; place-items: center; padding: 12px;
+    text-align: center; color: var(--ink-2); transition: border-color .15s, background .15s;
   }
-  .queried svg { display: block; width: 100%; height: 108px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+  .drop:hover, .drop.dragover { border-color: var(--same); background: var(--accent-wash); }
+  .drop:focus-within { outline: 2px solid var(--same); outline-offset: 2px; }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .drop .empty strong { color: var(--same); font-weight: 600; }
+  .drop .empty small { display: block; color: var(--muted); font-size: 12px; }
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; width: 100%; }
+  .thumbs.single { grid-template-columns: 1fr; }
+  .thumbs figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  .thumbs img { display: block; width: 100%; height: 56px; object-fit: contain; }
+  .thumbs.single img { height: 112px; }
+  .thumbs figcaption { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* 證據強度 */
-  #result { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 24px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+  .actions .examples { color: var(--muted); font-size: 13px; margin-left: auto; }
+  button {
+    font: inherit; border-radius: 8px; padding: 7px 13px;
+    border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--ink-2); }
+  button.primary { background: var(--same); border-color: var(--same); color: #fff; font-weight: 600; padding: 10px 26px; }
+  button.primary:hover:not(:disabled) { background: #256abf; border-color: #256abf; }
+  button:disabled { opacity: .45; cursor: default; }
+  .error { color: var(--diff); margin: 12px 0 0; }
+
+  /* 結果 */
+  #result { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 28px; }
+  #result[hidden] { display: none; }
   .lr-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
   .lr-value { font-size: 34px; font-weight: 700; line-height: 1.1; }
   .lr-band { font-size: 20px; font-weight: 600; }
@@ -89,10 +91,38 @@
   }
   .scale .marker { position: absolute; top: -5px; width: 2px; height: 22px; background: var(--ink); }
   .scale .ticks { position: relative; height: 34px; margin-top: 4px; font-size: 11px; color: var(--muted); }
-  .scale .ticks span { position: absolute; transform: translateX(-50%); text-align: center; white-space: nowrap; }
+  .scale .ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
   .scale .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-top: -8px; }
   .sigma-note { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); font-size: 13px; margin: 14px 0 0; }
   .sigma-note .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn-line); margin-top: 7px; flex: none; }
+
+  /* 族貢獻 */
+  .families { display: grid; gap: 7px; margin-top: 4px; }
+  .fam { display: grid; grid-template-columns: 116px 1fr 64px; gap: 10px; align-items: center; font-size: 14px; }
+  .fam .name { color: var(--ink-2); }
+  .bar { position: relative; width: 100%; height: 13px; }
+  .bar .axis { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line-strong); }
+  .bar .fill { position: absolute; top: 2px; height: 9px; border-radius: 2px; }
+  .val { min-width: 48px; text-align: right; }
+  .val.same { color: var(--same); font-weight: 600; }
+  .val.diff { color: var(--diff); font-weight: 600; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-2); margin-top: 12px; }
+  .legend i { display: inline-block; width: 22px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+  /* 圖 */
+  .figs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .figs { grid-template-columns: 1fr; } }
+  .plate { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .plate img { display: block; width: 100%; height: auto; }
+  .plate img.ref { opacity: .4; }
+  .plate img.q { position: absolute; inset: 0; mix-blend-mode: multiply; }
+  .plate svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .plate-cap { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .cbar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); margin-top: 10px; }
+  .cbar .ramp {
+    flex: 1; height: 10px; border-radius: 5px; border: 1px solid var(--line);
+    background: linear-gradient(90deg, var(--diff) 0%, #fcfcfb 50%, var(--same) 100%);
+  }
 
   /* 表格 */
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -101,42 +131,10 @@
   th:first-child, td:first-child { text-align: left; }
   tr:last-child td { border-bottom: 0; }
   .table-wrap { overflow-x: auto; }
-
-  /* 貢獻長條（表格內、族層級共用） */
-  .bar { position: relative; width: 190px; height: 13px; flex: none; }
-  .bar .axis { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line-strong); }
-  .bar .fill { position: absolute; top: 2px; height: 9px; border-radius: 2px; }
   .cell-bar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
-  .val { min-width: 48px; }
-  .val.same { color: var(--same); font-weight: 600; }
-  .val.diff { color: var(--diff); font-weight: 600; }
-  .families { display: grid; gap: 7px; margin-top: 4px; }
-  .fam { display: grid; grid-template-columns: 116px 1fr 64px; gap: 10px; align-items: center; font-size: 14px; }
-  .fam .name { color: var(--ink-2); }
-  .fam .bar { width: 100%; }
-  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-2); margin-top: 12px; }
-  .legend i { display: inline-block; width: 22px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  .cell-bar .bar { width: 170px; flex: none; }
 
-  /* 圖 */
-  .figs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 860px) { .figs { grid-template-columns: 1fr; } }
-  .plate { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
-  .plate svg { display: block; width: 100%; height: auto; }
-  .plate-cap { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
-  .cbar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); margin-top: 10px; }
-  .cbar .ramp {
-    flex: 1; height: 10px; border-radius: 5px;
-    background: linear-gradient(90deg, var(--diff) 0%, #fcfcfb 50%, var(--same) 100%);
-    border: 1px solid var(--line);
-  }
-  .marks { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
-  .marks li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; }
-  .marks .n {
-    width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
-    font-size: 11px; font-weight: 700; color: #fff;
-  }
-
-  /* 出處 */
+  /* 出處與警語 */
   .provenance { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
   .provenance b { color: var(--ink); font-weight: 600; }
   .disclaimer {
@@ -144,7 +142,6 @@
     padding: 14px 16px; font-size: 13px; color: var(--ink-2);
   }
   .disclaimer strong { color: var(--ink); }
-  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 </style>
 </head>
 <body>
@@ -152,33 +149,37 @@
   <h1>簽名比對 · 鑑識版</h1>
   <p class="lede">比對待鑑簽名與已知樣本，輸出證據強度與逐項差異。本工具不下真偽結論。</p>
 
-  <div class="mock">
-    <strong>⚑ UI 樣板</strong>
-    <span>畫面上所有數字、筆跡、熱區、對應點皆為假資料，未接後端。</span>
-    <div class="switch">
-      <span>切換情境：</span>
-      <button data-scenario="same" aria-pressed="true">支持同一人</button>
-      <button data-scenario="diff" aria-pressed="false">支持不同人</button>
-      <button data-scenario="none" aria-pressed="false">無法區分</button>
-    </div>
-  </div>
-
   <div class="inputs">
     <section class="card">
       <h2>已知樣本</h2>
-      <p class="hint">確認為當事人所寫的簽名。3 張以下不計算；10 張以上開始採用當事人自己的變化範圍。</p>
-      <div class="specimens" id="specimens"></div>
-      <p class="ghost" id="specimen-count" style="margin:10px 0 0"></p>
+      <p class="hint" id="specimen-hint">確認為當事人所寫的簽名。白底深色筆跡、裁切到簽名範圍效果最好。</p>
+      <label class="drop" id="specimens-drop">
+        <input type="file" id="specimens-input" accept="image/*" multiple aria-label="選擇已知樣本">
+        <div class="empty" id="specimens-empty"><strong>點選或拖曳圖片</strong>到這裡<small>可一次選多張</small></div>
+        <div class="thumbs" id="specimens-thumbs" hidden></div>
+      </label>
+      <p class="ghost" id="specimens-count" style="margin:10px 0 0"></p>
     </section>
     <section class="card">
       <h2>待鑑簽名</h2>
       <p class="hint">一次比對一份。</p>
-      <div class="queried" id="queried"></div>
-      <p class="ghost" style="margin:8px 0 0">questioned_01.png</p>
+      <label class="drop" id="questioned-drop">
+        <input type="file" id="questioned-input" accept="image/*" aria-label="選擇待鑑簽名">
+        <div class="empty" id="questioned-empty"><strong>點選或拖曳圖片</strong>到這裡</div>
+        <div class="thumbs single" id="questioned-thumbs" hidden></div>
+      </label>
     </section>
   </div>
 
-  <div id="result">
+  <div class="actions">
+    <button class="primary" id="compare" disabled>開始比對</button>
+    <span class="examples">載入範例（CEDAR 第 1 人）：</span>
+    <button data-sample="genuine">真簽名</button>
+    <button data-sample="forged">偽造</button>
+  </div>
+  <p class="error" id="error" role="alert" hidden></p>
+
+  <div id="result" hidden aria-live="polite">
     <section class="card">
       <h2>證據強度</h2>
       <div class="lr-head" style="margin-top:10px">
@@ -187,30 +188,17 @@
         <span class="lr-dir" id="lr-dir"></span>
       </div>
       <p class="hint" id="lr-explain" style="margin-top:8px"></p>
-
       <div class="scale">
         <div class="track"><div class="marker" id="lr-marker"></div></div>
         <div class="ticks" id="lr-ticks"></div>
         <div class="ends"><span>支持不同人</span><span>支持同一人</span></div>
       </div>
-
       <p class="sigma-note"><span class="dot"></span><span id="sigma-note"></span></p>
     </section>
 
     <section class="card">
-      <h2>逐張已知樣本</h2>
-      <p class="hint">每張已知樣本各自與待鑑簽名比對。標題數字是這些值的平均；若某張明顯偏離其他張，該張本身可能異常。</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>已知樣本</th><th>LR</th><th>級距</th></tr></thead>
-          <tbody id="specimen-rows"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="card">
       <h2>證據來自哪些觀察</h2>
-      <p class="hint">每一族的貢獻 = 權重 × 差異。往右代表該族的觀察支持同一人，往左代表支持不同人。兩個方向會同時出現。</p>
+      <p class="hint">每一族的貢獻 = 權重 ×（實際差異 − 同源配對的典型差異）。差得比一般人自己簽名時還小，就往右（支持同一人）；差得更多就往左。兩個方向會同時出現。</p>
       <div class="families" id="families"></div>
       <div class="legend">
         <span><i style="background:var(--same)"></i>支持同一人</span>
@@ -221,7 +209,7 @@
 
     <section class="card">
       <h2>筆畫方向的差異位置</h2>
-      <p class="hint">灰色為已知樣本的平均筆跡，黑色為待鑑簽名。每格為 10×10 像素區塊，顏色為該格的貢獻（權重 × 差異），非單純差異量。</p>
+      <p class="hint">灰色為已知樣本的平均筆跡，黑色為待鑑簽名。每格為 10×10 像素區塊，顏色為該格的貢獻（權重 × 差異），非單純差異量。滑鼠停留可看該格的貢獻值。</p>
       <div class="figs">
         <div>
           <div class="plate" id="plate-plain"></div>
@@ -229,21 +217,13 @@
         </div>
         <div>
           <div class="plate" id="plate-heat"></div>
-          <p class="plate-cap">貢獻熱區與標註點</p>
+          <p class="plate-cap">貢獻熱區</p>
         </div>
       </div>
       <div class="cbar">
         <span>支持不同人</span><span class="ramp"></span><span>支持同一人</span>
         <span class="ghost" id="heat-range"></span>
       </div>
-      <ul class="marks" id="marks"></ul>
-    </section>
-
-    <section class="card">
-      <h2>關鍵點對應</h2>
-      <p class="hint">左為已知樣本，右為待鑑簽名。連線為兩張圖對應得上的關鍵點；空心圓為已知樣本有、待鑑簽名找不到對應的位置。</p>
-      <div class="plate" id="plate-sift"></div>
-      <p class="plate-cap" id="sift-cap"></p>
     </section>
 
     <section class="card">
@@ -252,7 +232,7 @@
       <div class="table-wrap">
         <table>
           <thead><tr><th>特徵</th><th>已知樣本平均</th><th>待鑑值</th><th>貢獻</th></tr></thead>
-          <tbody id="feature-rows"></tbody>
+          <tbody id="named-rows"></tbody>
         </table>
       </div>
     </section>
@@ -261,334 +241,248 @@
       <h2>檢驗資訊</h2>
       <div class="provenance" id="provenance"></div>
       <div class="actions" style="margin-top:16px">
-        <button disabled>匯出報告（HTML）</button>
-        <span class="ghost">樣板未接匯出功能</span>
+        <button id="export">匯出報告（HTML）</button>
+        <span class="ghost">內嵌所有圖表與影像，下載到你的電腦；伺服器不保留簽名影像</span>
       </div>
     </section>
 
     <p class="disclaimer">
       <strong>本結果不得作為鑑定依據。</strong>
-      模型以公開研究資料集（CEDAR，西方拉丁字母簽名）校準，未針對中文簽名或本案件類型驗證，錯誤率未知。
+      模型以公開研究資料集（CEDAR，西方拉丁字母簽名）校準，未針對中文簽名或本案件類型驗證。
       離線比對無法取得筆順、書寫速度與筆壓，這些是分辨刻意模仿的關鍵線索。真偽判斷應由合格文書鑑識人員做出。
     </p>
   </div>
 </main>
 
 <script>
-  // ---- 假資料 ----------------------------------------------------------------
-  const FAMILIES = ['幾何', '方向分布', '小波', 'Radon', 'GLCM', 'HOG', 'LBP', 'SIFT'];
+  const $ = (id) => document.getElementById(id);
+  const state = { specimens: [], questioned: null, result: null };
+  let CONFIG = { minSpecimens: 3, personalSigmaFrom: 10 };
 
-  const SCENARIOS = {
-    same: {
-      lr: 480, seed: 7, heatBias: 0.75, sift: { matched: 68, unmatched: 4 },
-      specimens: [
-        ['known_01.png', 620], ['known_02.png', 540], ['known_03.png', 410],
-        ['known_04.png', 380], ['known_05.png', 470],
-      ],
-      families: [1.62, 0.94, 0.21, 0.35, -0.12, 1.18, 0.44, 0.88],
-      features: [
-        ['筆畫總長 ÷ 高度', 5.52, 5.57, 0.1, 0.62],
-        ['質心垂直位置', 0.35, 0.36, 0.2, 0.48],
-        ['寬高比', 2.27, 2.31, 0.2, 0.41],
-        ['SIFT 幾何一致性比例', 0.71, 0.68, -0.3, 0.37],
-        ['方向 45° 比例', 0.18, 0.19, 0.2, 0.29],
-        ['筆畫段數', 7.33, 7.00, -0.4, 0.24],
-        ['整體傾角（度）', 9.35, 9.02, -0.2, 0.22],
-        ['質心水平位置', 0.42, 0.41, -0.2, 0.18],
-        ['GLCM 對比（距離 1）', 0.44, 0.47, 0.5, -0.14],
-        ['墨跡密度', 0.05, 0.05, -0.2, 0.12],
-      ],
-    },
-    diff: {
-      lr: 1 / 260, seed: 21, heatBias: -0.8, sift: { matched: 21, unmatched: 27 },
-      specimens: [
-        ['known_01.png', 1 / 310], ['known_02.png', 1 / 180], ['known_03.png', 1 / 420],
-        ['known_04.png', 1 / 96], ['known_05.png', 1 / 350],
-      ],
-      families: [-1.94, -1.22, -0.18, -0.44, 0.09, -1.31, -0.52, -1.06],
-      features: [
-        ['質心垂直位置', 0.35, 0.51, 4.8, -1.21],
-        ['筆畫總長 ÷ 高度', 5.52, 4.18, -3.6, -0.94],
-        ['質心水平位置', 0.42, 0.48, 2.7, -0.71],
-        ['SIFT 幾何一致性比例', 0.71, 0.22, -4.1, -0.66],
-        ['方向 135° 比例', 0.12, 0.21, 3.1, -0.52],
-        ['筆畫段數', 7.33, 4.00, -1.5, -0.38],
-        ['寬高比', 2.27, 2.61, 1.4, -0.31],
-        ['整體傾角（度）', 9.35, 14.80, 2.2, -0.27],
-        ['墨跡密度', 0.05, 0.04, -1.1, -0.19],
-        ['GLCM 同質性（距離 3）', 0.62, 0.55, -0.9, 0.11],
-      ],
-    },
-    none: {
-      lr: 1.4, seed: 3, heatBias: 0.05, sift: { matched: 39, unmatched: 14 },
-      specimens: [
-        ['known_01.png', 2.2], ['known_02.png', 0.6], ['known_03.png', 3.1],
-        ['known_04.png', 0.9], ['known_05.png', 1.1],
-      ],
-      families: [0.42, -0.31, 0.06, 0.12, -0.08, -0.22, 0.18, 0.09],
-      features: [
-        ['質心垂直位置', 0.35, 0.39, 1.1, 0.24],
-        ['筆畫總長 ÷ 高度', 5.52, 5.12, -1.0, -0.21],
-        ['方向 90° 比例', 0.22, 0.19, -0.8, -0.18],
-        ['寬高比', 2.27, 2.41, 0.6, 0.16],
-        ['SIFT 幾何一致性比例', 0.71, 0.58, -1.1, -0.14],
-        ['筆畫段數', 7.33, 6.00, -0.6, -0.12],
-        ['整體傾角（度）', 9.35, 10.90, 0.6, 0.11],
-        ['質心水平位置', 0.42, 0.44, 0.4, 0.08],
-        ['GLCM 能量（距離 1）', 0.31, 0.33, 0.4, -0.06],
-        ['墨跡密度', 0.05, 0.05, 0.1, 0.04],
-      ],
-    },
+  const FAMILY_DESC = {
+    '幾何': '寬高比、重心、傾角、筆畫長度',
+    '方向分布': '筆畫走向、端點與交叉點',
+    '小波': '細節集中在哪個尺度',
+    'Radon': '各角度的投影分布',
+    'GLCM': '筆觸的灰階紋理',
+    'HOG': '各區域的筆畫方向',
+    'LBP': '局部筆觸紋理',
+    'SIFT': '關鍵點配對與幾何一致性',
   };
 
-  // 級距（ENFSI 風格，實作時改成可調設定）
-  const BANDS = [
-    [1000, '非常強烈支持'], [100, '強烈支持'], [10, '中度支持'], [2, '稍微支持'],
-  ];
-  function band(lr) {
-    const x = lr >= 1 ? lr : 1 / lr;
-    if (x < 2) return { text: '本次檢驗無法區分', dir: '', neutral: true };
-    const hit = BANDS.find(([t]) => x >= t);
-    return { text: hit[1], dir: lr >= 1 ? '同一人所寫' : '不同人所寫', neutral: false };
-  }
-  const fmtLr = (lr) => (lr >= 1 ? lr.toLocaleString('en-US', { maximumFractionDigits: 1 })
-                                 : `1 : ${(1 / lr).toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
-  const signed = (v, digits = 2) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
+  fetch('/model').then((r) => r.json()).then((m) => {
+    CONFIG = { ...CONFIG, ...m };
+    $('specimen-hint').textContent = `確認為當事人所寫的簽名。至少 ${m.minSpecimens} 張；`
+      + `達 ${m.personalSigmaFrom} 張以上才會採用當事人自己的變化範圍。白底深色筆跡、裁切到簽名範圍效果最好。`;
+  }).catch(() => {});
 
-  // ---- 合成筆跡（不使用任何資料集影像）---------------------------------------
-  // viewBox 0 0 220 150，與 HOG 的 22×15 格對齊，每格 10 單位
-  const STROKES = {
-    ref: ['M18,104 C32,54 44,116 56,76 C66,44 76,108 90,70 C100,42 110,102 124,74 C136,50 150,96 166,68 C178,46 192,82 202,64',
-          'M92,92 C110,84 138,82 174,88'],
-    same: ['M20,102 C34,53 46,114 58,75 C68,45 78,106 92,69 C102,43 112,100 126,73 C138,51 152,94 168,67 C180,47 194,81 204,65',
-           'M94,90 C112,83 140,81 176,87'],
-    diff: ['M22,110 C38,72 48,118 62,88 C72,64 84,112 96,84 C104,66 116,108 130,88 C142,70 156,104 172,86 C182,74 194,96 202,84',
-           'M100,104 C118,99 142,97 172,101'],
-    none: ['M19,103 C33,56 45,115 57,78 C67,47 77,107 91,72 C101,45 111,101 125,76 C137,53 151,95 167,70 C179,49 193,83 203,66',
-           'M93,94 C111,86 139,84 175,90'],
-  };
-
-  function strokeSvg(paths, { color = '#0b0b0b', width = 2.2, opacity = 1 } = {}) {
-    return paths.map((d) => `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}"
-      stroke-linecap="round" opacity="${opacity}"/>`).join('');
+  // ---- 上傳 ----------------------------------------------------------------
+  function showThumbs(files, thumbsEl, emptyEl) {
+    thumbsEl.querySelectorAll('img').forEach((img) => URL.revokeObjectURL(img.src));
+    thumbsEl.replaceChildren(...files.map((file) => {
+      const fig = document.createElement('figure');
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      img.alt = file.name;
+      const cap = document.createElement('figcaption');
+      cap.textContent = file.name;
+      fig.append(img, cap);
+      return fig;
+    }));
+    thumbsEl.hidden = files.length === 0;
+    emptyEl.hidden = files.length > 0;
   }
 
-  // 預設收緊到筆跡所在的範圍，圖才不會大半是空白
-  function plate(inner, { box = '0 24 220 104' } = {}) {
-    return `<svg viewBox="${box}" role="img">${inner}</svg>`;
+  function render() {
+    showThumbs(state.specimens, $('specimens-thumbs'), $('specimens-empty'));
+    showThumbs(state.questioned ? [state.questioned] : [], $('questioned-thumbs'), $('questioned-empty'));
+    const n = state.specimens.length;
+    $('specimens-count').textContent = n
+      ? `共 ${n} 張${n < CONFIG.minSpecimens ? `（不足 ${CONFIG.minSpecimens} 張，無法計算）` : ''}`
+      : '';
+    $('compare').disabled = !(n >= CONFIG.minSpecimens && state.questioned);
+    $('result').hidden = true;
+    $('error').hidden = true;
   }
 
-  // ---- 假熱區：以固定種子產生，讓每次畫面一致 --------------------------------
-  function rng(seed) {
-    let s = seed * 9301 + 49297;
-    return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  $('specimens-input').addEventListener('change', (e) => {
+    state.specimens = [...e.target.files]; e.target.value = ''; render();
+  });
+  $('questioned-input').addEventListener('change', (e) => {
+    state.questioned = e.target.files[0] || null; e.target.value = ''; render();
+  });
+  for (const drop of [$('specimens-drop'), $('questioned-drop')]) {
+    drop.addEventListener('dragenter', () => drop.classList.add('dragover'));
+    for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, () => drop.classList.remove('dragover'));
   }
-  // 沿著實際的 SVG 路徑取樣，讓熱區格子與關鍵點都落在筆畫上
-  const probe = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  probe.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
-  document.body.append(probe);
-  function samplePath(paths, n) {
-    return paths.flatMap((d) => {
-      const el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      el.setAttribute('d', d);
-      probe.append(el);
-      const len = el.getTotalLength();
-      const pts = Array.from({ length: n }, (_, i) => {
-        const { x, y } = el.getPointAtLength((i + 0.5) / n * len);
-        return [x, y];
-      });
-      el.remove();
-      return pts;
+
+  async function fetchSample(name) {
+    const res = await fetch(`/sample/${name}`);
+    if (!res.ok) throw new Error(`範例圖 ${name} 載入失敗`);
+    return new File([await res.blob()], name, { type: 'image/png' });
+  }
+
+  for (const btn of document.querySelectorAll('[data-sample]')) {
+    btn.addEventListener('click', async () => {
+      try {
+        const q = btn.dataset.sample === 'genuine' ? 'original_1_20.png' : 'forgeries_1_5.png';
+        [state.specimens, state.questioned] = await Promise.all([
+          Promise.all([1, 2, 3, 4, 5].map((i) => fetchSample(`original_1_${i}.png`))),
+          fetchSample(q),
+        ]);
+        render();
+      } catch (err) { showError(err.message); }
     });
   }
 
-  function heatCells(scenario, paths) {
-    const rand = rng(scenario.seed);
-    const seen = new Map();
-    for (const [x, y] of samplePath(paths, 90)) {             // 只有筆畫經過的格子才有 HOG 值
-      const c = Math.floor(x / 10), r = Math.floor(y / 10);
-      for (const [dr, dc] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const rr = r + dr, cc = c + dc;
-        const k = `${rr},${cc}`;
-        if (rr < 0 || rr > 14 || cc < 0 || cc > 21 || seen.has(k) || rand() > 0.55) continue;
-        const drift = (rand() - 0.5) * 1.5;                   // 兩個方向都會出現
-        seen.set(k, { r: rr, c: cc, v: scenario.heatBias * (0.4 + rand() * 1.5) + drift });
-      }
+  const toDataURL = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, data: reader.result });
+    reader.onerror = () => reject(new Error(`讀不到檔案 ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+  function showError(message) {
+    $('error').textContent = message;
+    $('error').hidden = false;
+  }
+
+  $('compare').addEventListener('click', async () => {
+    const btn = $('compare');
+    btn.disabled = true; btn.textContent = '計算中…'; $('error').hidden = true;
+    try {
+      const body = {
+        specimens: await Promise.all(state.specimens.map(toDataURL)),
+        questioned: await toDataURL(state.questioned),
+      };
+      const res = await fetch('/compare', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({ error: `伺服器回應錯誤（${res.status}）` }));
+      if (!res.ok) throw new Error(data.error);
+      state.result = data;
+      showResult(data);
+    } catch (err) {
+      showError(err.message || '無法連線到伺服器，請確認 forensic_app.py 還在執行');
+    } finally {
+      btn.disabled = false; btn.textContent = '開始比對';
     }
-    return [...seen.values()];
+  });
+
+  // ---- 結果呈現 ------------------------------------------------------------
+  const fmtLr = (lr) => (lr >= 1
+    ? lr.toLocaleString('en-US', { maximumFractionDigits: lr < 10 ? 1 : 0 })
+    : `1 : ${(1 / lr).toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
+  const signed = (v, digits = 2) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
+  const fmtVal = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(v !== 0 && Math.abs(v) < 0.01 ? 4 : 2));
+
+  function bar(value, max, width = null) {
+    const w = (Math.abs(value) / max) * 50;
+    const color = value >= 0 ? 'var(--same)' : 'var(--diff)';
+    const style = width ? `width:${width}` : '';
+    return `<span class="bar" style="${style}"><span class="axis"></span>
+      <span class="fill" style="background:${color};width:${w}%;left:${value >= 0 ? 50 : 50 - w}%"></span></span>`;
   }
 
-  // 標註點之間至少隔 2 格，編號才不會疊在一起
-  function pickMarks(cells, n = 6) {
-    const marks = [];
-    for (const c of [...cells].sort((a, b) => Math.abs(b.v) - Math.abs(a.v))) {
-      if (marks.length >= n) break;
-      if (marks.every((m) => Math.abs(m.c - c.c) + Math.abs(m.r - c.r) > 2)) marks.push(c);
-    }
-    return marks;
-  }
-
-  const heatColor = (v, max) => {
-    const a = Math.min(Math.abs(v) / max, 1) * 0.85;         // 透明度隨絕對值變化
-    return `fill="${v >= 0 ? 'var(--same)' : 'var(--diff)'}" opacity="${a.toFixed(3)}"`;
-  };
-
-  // ---- 渲染 ------------------------------------------------------------------
-  const $ = (id) => document.getElementById(id);
-
-  function renderInputs(key) {
-    $('specimens').innerHTML = SCENARIOS[key].specimens.map(([name], i) => `
-      <div class="specimen">
-        ${plate(`<g transform="translate(${110 - 110 * (0.94 + 0.03 * (i % 3))},${(i % 2) * 4}) scale(${0.94 + 0.03 * (i % 3)})">`
-          + strokeSvg(STROKES.ref, { width: 2.4 }) + '</g>')}
-        <div class="cap">${name}</div>
-      </div>`).join('');
-    $('specimen-count').textContent = `共 5 張。樣本數 3–9 張，使用族群變化範圍。`;
-    $('queried').innerHTML = plate(strokeSvg(STROKES[key === 'same' ? 'same' : key]));
-  }
-
-  function renderEvidence(key) {
-    const sc = SCENARIOS[key];
-    const b = band(sc.lr);
-    $('lr-value').textContent = `LR ${fmtLr(sc.lr)}`;
-    $('lr-band').textContent = b.text;
-    $('lr-band').style.color = b.neutral ? 'var(--ink-2)' : (sc.lr >= 1 ? 'var(--same)' : 'var(--diff)');
-    $('lr-dir').textContent = b.neutral ? '' : `· 支持「${b.dir}」`;
-    $('lr-explain').textContent = b.neutral
+  function showResult(r) {
+    const neutral = r.band.neutral;
+    $('lr-value').textContent = `LR ${fmtLr(r.lr)}`;
+    $('lr-band').textContent = r.band.text;
+    $('lr-band').style.color = neutral ? 'var(--ink-2)' : (r.lr >= 1 ? 'var(--same)' : 'var(--diff)');
+    $('lr-dir').textContent = neutral ? '' : `· 支持「${r.band.direction}」`;
+    $('lr-explain').textContent = neutral
       ? '觀察到的差異在「同一人」與「不同人」兩種假設下的可能性相近，本次檢驗無法區分。'
-      : `觀察到這些特徵差異，在「${b.dir}」的假設下，可能性約為另一假設的 ${fmtLr(sc.lr >= 1 ? sc.lr : 1 / sc.lr)} 倍。`;
+      : `觀察到這些特徵差異，在「${r.band.direction}」的假設下，`
+        + `可能性約為另一假設的 ${fmtLr(r.lr >= 1 ? r.lr : 1 / r.lr)} 倍。`;
 
-    const pos = (Math.max(-3, Math.min(3, Math.log10(sc.lr))) + 3) / 6 * 100;
+    const pos = (Math.max(-3, Math.min(3, Math.log10(r.lr))) + 3) / 6 * 100;
     $('lr-marker').style.left = `${pos}%`;
     $('lr-ticks').innerHTML = [[-3, '1:1000'], [-2, '1:100'], [-1, '1:10'], [0, '1'], [1, '10'], [2, '100'], [3, '1000']]
       .map(([e, label]) => `<span style="left:${(e + 3) / 6 * 100}%">${label}</span>`).join('');
+    $('sigma-note').textContent = r.sigmaNote;
 
-    $('sigma-note').textContent = 'σ 來源：族群變化範圍（開發資料集 25 位書寫者）。已知樣本 5 張，未達 10 張，'
-      + '尚未採用當事人自己的變化範圍。';
+    // 族貢獻
+    const famVals = Object.values(r.families);
+    const famMax = Math.max(0.05, ...famVals.map(Math.abs)) * 1.1;
+    $('families').innerHTML = Object.entries(r.families).map(([name, v]) => `
+      <div class="fam" title="${FAMILY_DESC[name] || ''}">
+        <span class="name">${name}</span>${bar(v, famMax)}
+        <span class="val mono ${v >= 0 ? 'same' : 'diff'}">${signed(v)}</span>
+      </div>`).join('');
 
-    $('specimen-rows').innerHTML = sc.specimens.map(([name, lr]) => {
-      const sb = band(lr);
-      return `<tr><td>${name}</td><td class="mono">${fmtLr(lr)}</td>
-        <td style="color:${sb.neutral ? 'var(--ink-2)' : (lr >= 1 ? 'var(--same)' : 'var(--diff)')}">${sb.text}</td></tr>`;
-    }).join('');
-  }
-
-  function renderFamilies(key) {
-    const vals = SCENARIOS[key].families;
-    const max = Math.max(0.5, ...vals.map(Math.abs)) * 1.1;
-    $('families').innerHTML = FAMILIES.map((name, i) => {
-      const v = vals[i];
-      const w = (Math.abs(v) / max) * 50;
+    // 熱區：後端回傳每格的貢獻，前端畫成可 hover 的 SVG
+    const { grid, max, rows, cols, cell } = r.heatmap;
+    const w = cols * cell, h = rows * cell;
+    const inks = `<img class="ref" src="${r.images.reference}" alt="已知樣本平均筆跡">
+                  <img class="q" src="${r.images.questioned}" alt="待鑑簽名">`;
+    $('plate-plain').innerHTML = inks;
+    const rects = grid.flatMap((row, ri) => row.map((v, ci) => {
+      if (Math.abs(v) < max * 0.02) return '';
+      const alpha = Math.min(Math.abs(v) / max, 1) * 0.85;
       const color = v >= 0 ? 'var(--same)' : 'var(--diff)';
-      return `<div class="fam">
-        <span class="name">${name}</span>
-        <span class="bar"><span class="axis"></span>
-          <span class="fill" style="background:${color};width:${w}%;left:${v >= 0 ? 50 : 50 - w}%"></span></span>
-        <span class="val mono ${v >= 0 ? 'same' : 'diff'}" style="text-align:right">${signed(v)}</span>
-      </div>`;
+      return `<rect x="${ci * cell}" y="${ri * cell}" width="${cell}" height="${cell}"
+        fill="${color}" opacity="${alpha.toFixed(3)}"><title>貢獻 ${signed(v)}（${v >= 0 ? '支持同一人' : '支持不同人'}）</title></rect>`;
+    })).join('');
+    $('plate-heat').innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${rects}</svg>${inks}`;
+    $('heat-range').textContent = `色階上下限 ±${max.toFixed(3)}`;
+
+    // 具名特徵
+    const namedMax = Math.max(...r.named.map((f) => Math.abs(f.contribution))) * 1.15 || 1;
+    $('named-rows').innerHTML = r.named.map((f) => {
+      const zText = f.z === null ? '成對特徵，無單張數值' : `偏離 ${signed(f.z, 1)}σ`;
+      return `<tr title="${f.name}：${zText}">
+        <td>${f.name}</td>
+        <td class="mono">${f.reference === null ? '—' : fmtVal(f.reference)}</td>
+        <td class="mono">${fmtVal(f.questioned)}</td>
+        <td><span class="cell-bar">${bar(f.contribution, namedMax, '170px')}
+          <span class="val mono ${f.contribution >= 0 ? 'same' : 'diff'}">${signed(f.contribution)}</span></span></td>
+      </tr>`;
     }).join('');
-  }
 
-  function renderHeat(key) {
-    const sc = SCENARIOS[key];
-    const qPaths = STROKES[key === 'same' ? 'same' : key];
-    const cells = heatCells(sc, qPaths);
-    const max = Math.max(...cells.map((c) => Math.abs(c.v))) || 1;
-    const marks = pickMarks(cells);
-
-    $('plate-plain').innerHTML = plate(strokeSvg(STROKES.ref, { color: '#898781', width: 2, opacity: 0.5 })
-      + strokeSvg(STROKES[key === 'same' ? 'same' : key]));
-
-    const rects = cells.map((c) =>
-      `<rect x="${c.c * 10}" y="${c.r * 10}" width="10" height="10" ${heatColor(c.v, max)}/>`).join('');
-    const refInk = strokeSvg(STROKES.ref, { color: '#898781', width: 2, opacity: 0.5 });
-    const qInk = strokeSvg(qPaths);
-    const markers = marks.map((c, i) => `
-      <circle cx="${c.c * 10 + 5}" cy="${c.r * 10 + 5}" r="6.4" fill="${c.v >= 0 ? 'var(--same)' : 'var(--diff)'}"/>
-      <text x="${c.c * 10 + 5}" y="${c.r * 10 + 8.2}" text-anchor="middle"
-        font-size="8" font-weight="700" fill="#fff">${i + 1}</text>`).join('');
-    $('plate-heat').innerHTML = plate(rects + refInk + qInk + markers);
-    $('heat-range').textContent = `色階上下限 ±${max.toFixed(2)}（99 百分位截斷）`;
-
-    $('marks').innerHTML = marks.map((c, i) => {
-      const dirText = c.v >= 0 ? '此處筆畫方向與已知樣本一致，支持同一人' : '此處筆畫方向偏離已知樣本，支持不同人';
-      return `<li>
-        <span class="n" style="background:${c.v >= 0 ? 'var(--same)' : 'var(--diff)'}">${i + 1}</span>
-        <span>${dirText}（貢獻 ${signed(c.v)}，第 ${c.r + 1} 列第 ${c.c + 1} 欄）</span>
-      </li>`;
-    }).join('');
-  }
-
-  function renderSift(key) {
-    const sc = SCENARIOS[key];
-    const rand = rng(sc.seed + 5);
-    // 左右兩側各自沿自己的筆畫取樣，同一索引代表筆畫上的同一相對位置
-    const refPts = samplePath(STROKES.ref, 11);
-    const qPts = samplePath(STROKES[key === 'same' ? 'same' : key], 11);
-    const order = refPts.map((_, i) => i).sort(() => rand() - 0.5);
-    const keep = order.slice(0, 14);
-    const pairs = keep.map((i) => [refPts[i][0], refPts[i][1], qPts[i][0] + 240, qPts[i][1]]);
-    const unmatched = order.slice(-Math.min(6, Math.round(sc.sift.unmatched / 4) + 1)).map((i) => refPts[i]);
-    const lines = pairs.map(([x1, y1, x2, y2]) =>
-      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--same)" stroke-width="0.6" opacity="0.32"/>
-       <circle cx="${x1}" cy="${y1}" r="2" fill="var(--same)"/><circle cx="${x2}" cy="${y2}" r="2" fill="var(--same)"/>`).join('');
-    const holes = unmatched.map(([x, y]) =>
-      `<circle cx="${x}" cy="${y}" r="3.4" fill="none" stroke="var(--diff)" stroke-width="1.2"/>`).join('');
-    const left = `<g>${strokeSvg(STROKES.ref, { color: '#52514e' })}</g>`;
-    const right = `<g transform="translate(240,0)">${strokeSvg(STROKES[key === 'same' ? 'same' : key])}</g>`;
-    const labels = `<text x="8" y="36" font-size="8" fill="#898781">已知樣本</text>
-                    <text x="248" y="36" font-size="8" fill="#898781">待鑑簽名</text>`;
-    $('plate-sift').innerHTML = plate(left + right + lines + holes + labels, { box: '0 24 460 104' });
-    $('sift-cap').textContent = `對應得上 ${sc.sift.matched} 對，已知樣本有而待鑑簽名找不到對應 ${sc.sift.unmatched} 處（空心圓）。`;
-  }
-
-  function renderFeatures(key) {
-    const rows = SCENARIOS[key].features;
-    const max = Math.max(...rows.map((r) => Math.abs(r[4]))) * 1.15;
-    $('feature-rows').innerHTML = rows.map(([name, ref, q, z, c]) => {
-      const w = (Math.abs(c) / max) * 50;
-      const color = c >= 0 ? 'var(--same)' : 'var(--diff)';
-      const fmt = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
-      return `<tr title="偏離 ${signed(z, 1)}σ">
-        <td>${name}</td><td class="mono">${fmt(ref)}</td><td class="mono">${fmt(q)}</td>
-        <td><span class="cell-bar">
-          <span class="bar"><span class="axis"></span>
-            <span class="fill" style="background:${color};width:${w}%;left:${c >= 0 ? 50 : 50 - w}%"></span></span>
-          <span class="val mono ${c >= 0 ? 'same' : 'diff'}">${signed(c)}</span>
-        </span></td></tr>`;
-    }).join('');
-  }
-
-  function renderProvenance() {
-    $('provenance').innerHTML = [
-      ['特徵', '8 族共 3330 維（幾何、方向分布、小波、Radon、GLCM、HOG、LBP、SIFT）'],
+    // 檢驗資訊
+    const v = r.provenance;
+    const rows_ = [
+      ['特徵', `${CONFIG.families ? CONFIG.families.length : 8} 族共 ${r.dims.total} 維，非零權重 ${r.dims.nonzero}`],
       ['判定方式', '差值向量 → Elastic Net 線性模型 → 邏輯迴歸校準 → likelihood ratio'],
-      ['校準資料', 'CEDAR：訓練 18 位書寫者、校準 7 位（與評估資料不重疊）'],
-      ['驗證結果', 'Cllr 0.41（熟練偽造）／0.12（隨機不同人）　※ 樣板假數字'],
-      ['級距定義', 'ENFSI 風格：2–10 稍微、10–100 中度、100–1000 強烈、1000 以上非常強烈支持'],
-      ['資料保存', '上傳影像僅寫入暫存資料夾，運算後即刪，伺服器不保留簽名影像'],
-    ].map(([k, v]) => `<div><b>${k}：</b>${v}</div>`).join('');
-  }
-
-  function render(key) {
-    renderInputs(key);
-    renderEvidence(key);
-    renderFamilies(key);
-    renderHeat(key);
-    renderSift(key);
-    renderFeatures(key);
-    renderProvenance();
-    for (const btn of document.querySelectorAll('[data-scenario]')) {
-      btn.setAttribute('aria-pressed', String(btn.dataset.scenario === key));
+      ['已知樣本', `${r.nSpecimens} 張`],
+      ['模型超參數', `alpha=${r.hyperparams.alpha}, l1_ratio=${r.hyperparams.l1_ratio}`],
+      ['校準資料', r.dataset],
+    ];
+    if (v) {
+      rows_.push(['驗證（Cllr）', `熟練偽造 ${v.cllr['熟練偽造'].toFixed(3)}　隨機不同人 ${v.cllr['隨機不同人'].toFixed(3)}`
+        + `　（在 CEDAR 第 1–${v.n_eval_users} 人上，每人 ${v.n_ref} 張已知樣本）`]);
+      rows_.push(['驗證（EER）', `熟練偽造 ${(v.eer['熟練偽造'] * 100).toFixed(1)}%　`
+        + `隨機不同人 ${(v.eer['隨機不同人'] * 100).toFixed(1)}%`]);
+    } else {
+      rows_.push(['驗證', '模型尚未驗證（請執行 validate.py）']);
     }
+    $('provenance').innerHTML = rows_.map(([k, val]) => `<div><b>${k}：</b>${val}</div>`).join('');
+
+    $('result').hidden = false;
+    $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  for (const btn of document.querySelectorAll('[data-scenario]')) {
-    btn.addEventListener('click', () => render(btn.dataset.scenario));
-  }
-  // 樣板方便查看：?s=diff / ?s=none 直接載入該情境
-  const param = new URLSearchParams(location.search).get('s');
-  render(SCENARIOS[param] ? param : 'same');
+  // ---- 匯出：把目前結果組成單一 HTML 下載 ----------------------------------
+  $('export').addEventListener('click', () => {
+    if (!state.result) return;
+    const clone = $('result').cloneNode(true);
+    clone.querySelector('.actions').remove();
+    clone.removeAttribute('hidden');
+    const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>簽名比對報告 ${new Date().toISOString().slice(0, 10)}</title>
+<style>${document.querySelector('style').textContent}
+  #result { display: grid; gap: 16px; max-width: 1120px; margin: 24px auto; padding: 0 16px; }
+</style></head><body><main>
+<h1>簽名比對報告</h1>
+<p class="lede">產生時間 ${new Date().toLocaleString('zh-TW')}　已知樣本 ${state.result.nSpecimens} 張，待鑑簽名 1 張</p>
+${clone.outerHTML}</main></body></html>`;
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `簽名比對報告_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
 </script>
 </body>
 </html>

@@ -14,16 +14,16 @@ import numpy as np
 import torch
 from skimage import img_as_ubyte
 from skimage.io import imread
-from sklearn.metrics import roc_curve
+
+from features import CANVAS, N_SIGS, N_USERS, cedar_path, eer  # 共用常數與工具
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / 'sigver'))
 from sigver.featurelearning.models import SigNet  # noqa: E402
 from sigver.preprocessing.normalize import preprocess_signature  # noqa: E402
 
-CANVAS = (952, 1360)  # 預訓練模型用的畫布大小，簽名要比它小
-CEDAR = ROOT / 'data/signatures'
-N_USERS, N_SIGS = 55, 24
+# 注意：這支是 SigNet 對照組，前處理刻意維持原論文的做法（不做 features.load_gray 的尺寸正規化），
+# 因為 data/cedar_signet.npz 是照這個流程建的。
 
 state_dict, _, _ = torch.load(ROOT / 'sigver/models/signet.pth', weights_only=False)
 signet = SigNet().eval()
@@ -36,11 +36,6 @@ def embed(paths):
     x = torch.from_numpy(x).unsqueeze(1).float().div(255)
     with torch.no_grad():
         return torch.cat([signet(b) for b in x.split(64)]).numpy()
-
-
-def cedar_path(kind, user, i):  # kind: 'original' | 'forgeries'，user/i 從 1 開始
-    folder = 'full_org' if kind == 'original' else 'full_forg'
-    return CEDAR / folder / f'{kind}_{user}_{i}.png'
 
 
 def cedar_features():
@@ -61,14 +56,6 @@ def enroll(reference_signatures):
 
 def cosine(features, prototype):
     return features @ prototype / (np.linalg.norm(features, axis=-1) * np.linalg.norm(prototype))
-
-
-def eer(genuine_scores, forgery_scores):
-    """等錯誤率：誤拒率 = 誤收率 的那個點。回傳 (EER, 閾值)"""
-    y = np.r_[np.ones(len(genuine_scores)), np.zeros(len(forgery_scores))]
-    fpr, tpr, thr = roc_curve(y, np.r_[genuine_scores, forgery_scores])
-    i = np.argmin(np.abs(fpr - (1 - tpr)))
-    return (fpr[i] + 1 - tpr[i]) / 2, thr[i]
 
 
 if __name__ == '__main__':
