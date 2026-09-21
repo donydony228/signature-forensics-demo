@@ -107,7 +107,8 @@ def run_comparison(specimens, questioned):
     sigmas, sigma_note = blend_sigmas(ref_feats)
 
     # 每張已知樣本各算一次：差值向量 → 分數 → LR
-    diffs = np.array([T.diff_vector(q_feats, rf, sigmas, F.sift_pair(q_sift, rs))
+    # sift_pair 的第一個參數與訓練時一致（訓練時固定是本人的真簽名）
+    diffs = np.array([T.diff_vector(q_feats, rf, sigmas, F.sift_pair(rs, q_sift))
                       for (rf, _, rs) in refs])
     scores = diffs @ COEF + MODEL['intercept']
     per_specimen = [{'name': s['name'], 'score': float(sc), 'lr': to_lr(sc), 'band': band(to_lr(sc))}

@@ -90,6 +90,24 @@ def sample_pairs(feats, sift, sigmas, users, rng):
     return np.array(X), np.array(y), np.array(groups)
 
 
+def cached_pairs(feats, sift, sigmas, users, tag):
+    """配對取樣的結果存成快取：SIFT 成對比較每組要 42 ms，5400 組就要近 4 分鐘，
+    train.py 和 validate.py 共用同一份，不必各算一次。
+
+    config 記錄取樣設定；設定或 σ 一變就重算。"""
+    cache = ROOT / f'data/pairs_{tag}.npz'
+    config = json.dumps({'users': list(users), 'plan': PAIRS_PER_USER, 'seed': SEED,
+                         'sigma_sum': float(sum(v.sum() for v in sigmas.values()))}, sort_keys=True)
+    if cache.exists():
+        d = np.load(cache)
+        if str(d['config']) == config:
+            return d['X'], d['y'], d['groups']
+        print(f'  （{tag} 配對快取的設定已變，重新取樣）', flush=True)
+    X, y, groups = sample_pairs(feats, sift, sigmas, users, np.random.default_rng(SEED))
+    np.savez(cache, X=X, y=y, groups=groups, config=config)
+    return X, y, groups
+
+
 def fit_elastic_net(X, y, groups):
     """以寫者為單位分組交叉驗證挑超參數。隨機切分會讓同一寫者的配對落在兩邊，高估效果。
 
@@ -107,7 +125,7 @@ def fit_elastic_net(X, y, groups):
                 s = m.decision_function(X[va])
                 scores.append(1 - F.eer(s[y[va] == 1], s[y[va] == 0])[0])   # 用 1-EER 當分數
             mean = float(np.mean(scores))
-            print(f'  alpha={alpha:<8g} l1_ratio={l1_ratio:<5} 交叉驗證 1-EER={mean:.4f}')
+            print(f'  alpha={alpha:<8g} l1_ratio={l1_ratio:<5} 交叉驗證 1-EER={mean:.4f}', flush=True)
             if best is None or mean > best[0]:
                 best = (mean, alpha, l1_ratio)
 
@@ -128,17 +146,16 @@ def fit_calibration(scores, labels):
 
 
 if __name__ == '__main__':
-    print('載入特徵快取……')
+    print('載入特徵快取……', flush=True)
     feats, sift = F.cedar_features(), F.cedar_sift()
     sigmas = build_sigmas(feats)
-    rng = np.random.default_rng(SEED)
 
     print(f'\n取樣訓練配對（{len(list(TRAIN_USERS))} 位寫者，每人 '
           f'{sum(PAIRS_PER_USER.values())} 組）……')
-    Xtr, ytr, gtr = sample_pairs(feats, sift, sigmas, TRAIN_USERS, rng)
-    print(f'  {Xtr.shape[0]} 組配對 × {Xtr.shape[1]} 維（同一人 {int(ytr.sum())}，不同人 {int((1 - ytr).sum())}）')
+    Xtr, ytr, gtr = cached_pairs(feats, sift, sigmas, TRAIN_USERS, 'train')
+    print(f'  {Xtr.shape[0]} 組配對 × {Xtr.shape[1]} 維（同一人 {int(ytr.sum())}，不同人 {int((1 - ytr).sum())}）', flush=True)
 
-    print('\n分組交叉驗證挑超參數……')
+    print('\n分組交叉驗證挑超參數……', flush=True)
     model, alpha, l1_ratio = fit_elastic_net(Xtr, ytr, gtr)
 
     # 同源配對的典型差異，當作貢獻拆解的基準。
@@ -146,10 +163,10 @@ if __name__ == '__main__':
     # 沒有基準的話，貢獻 = 權重 × 絕對差，符號全由權重決定，長條會全部朝同一邊。
     baseline = Xtr[ytr == 1].mean(axis=0)
 
-    print(f'\n取樣校準配對（{len(list(CALIB_USERS))} 位寫者，模型沒見過）……')
-    Xca, yca, _ = sample_pairs(feats, sift, sigmas, CALIB_USERS, rng)
+    print(f'\n取樣校準配對（{len(list(CALIB_USERS))} 位寫者，模型沒見過）……', flush=True)
+    Xca, yca, _ = cached_pairs(feats, sift, sigmas, CALIB_USERS, 'calib')
     cal_a, cal_b = fit_calibration(model.decision_function(Xca), yca)
-    print(f'  log LR = {cal_a:.4f} × 分數 + {cal_b:.4f}')
+    print(f'  log LR = {cal_a:.4f} × 分數 + {cal_b:.4f}', flush=True)
 
     MODEL_PATH.parent.mkdir(exist_ok=True)
     MODEL_PATH.write_text(json.dumps({
@@ -166,4 +183,4 @@ if __name__ == '__main__':
         'pairs_per_user': PAIRS_PER_USER,
         'dataset': 'CEDAR（西方拉丁字母簽名）—— 原型數字，不可用於實際案件',
     }, ensure_ascii=False, indent=1))
-    print(f'\n已存 {MODEL_PATH.relative_to(ROOT)}')
+    print(f'\n已存 {MODEL_PATH.relative_to(ROOT)}', flush=True)

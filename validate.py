@@ -8,8 +8,9 @@
 熟練偽造與隨機不同人一律分開報：兩者混算會被容易分辨的隨機組把數字拉漂亮，
 掩蓋熟練偽造的真實難度，而鑑識案件面對的幾乎都是前者。
 
-    .venv/bin/python validate.py            # 完整驗證（含消融，較慢）
+    .venv/bin/python validate.py            # 完整驗證（含消融）
     .venv/bin/python validate.py --no-ablation
+    .venv/bin/python validate.py --subsets  # 另外試幾種族組合（消融是一次拿一族，這個看組合效果）
 """
 import json
 import sys
@@ -58,7 +59,8 @@ def build_eval_trials(feats, sift, sigmas, rng):
 
         def mean_diff(kind, uu, ii):
             q, q_sift = vec(kind, uu, ii), sift[(kind, uu + 1, ii + 1)]
-            return np.mean([T.diff_vector(q, rv, sigmas, F.sift_pair(q_sift, rs))
+            # sift_pair 的第一個參數與訓練時一致（訓練時固定是本人的真簽名）
+            return np.mean([T.diff_vector(q, rv, sigmas, F.sift_pair(rs, q_sift))
                             for rv, rs in ref_data], axis=0)
 
         for i in tests:
@@ -73,10 +75,27 @@ def build_eval_trials(feats, sift, sigmas, rng):
     return {k: np.array(v) for k, v in trials.items()}
 
 
+def cached_trials(feats, sift, sigmas):
+    """評估試驗的差值向量存成快取：8280 次 SIFT 成對比較要 6 分鐘，
+    換模型或跑組合實驗時不必重算（試驗只取決於 σ 與取樣設定，與權重無關）"""
+    cache = ROOT / 'data/eval_trials.npz'
+    config = json.dumps({'users': list(T.EVAL_USERS), 'n_ref': N_REF, 'n_test': N_TEST_GENUINE,
+                         'n_random': N_RANDOM_PER_USER, 'seed': T.SEED,
+                         'sigma_sum': float(sum(v.sum() for v in sigmas.values()))}, sort_keys=True)
+    if cache.exists():
+        d = np.load(cache)
+        if str(d['config']) == config:
+            return {k: d[k] for k in ('同源', '熟練偽造', '隨機不同人')}
+        print('  （評估試驗快取的設定已變，重新建立）', flush=True)
+    trials = build_eval_trials(feats, sift, sigmas, np.random.default_rng(T.SEED))
+    np.savez(cache, config=config, **trials)
+    return trials
+
+
 def score_and_lr(X, coef, intercept, calib):
-    """差值向量 → 原始分數 → likelihood ratio"""
+    """差值向量 → 原始分數 → likelihood ratio。指數要夾住，否則大分數會溢位成 inf，Cllr 跟著變 inf"""
     scores = X @ coef + intercept
-    return scores, np.exp(calib['a'] * scores + calib['b'])
+    return scores, np.exp(np.clip(calib['a'] * scores + calib['b'], -30, 30))
 
 
 def evaluate(trials, coef, intercept, calib):
@@ -128,26 +147,25 @@ if __name__ == '__main__':
     coef, intercept, calib = np.array(model['coef']), model['intercept'], model['calibration']
     slices = {k: tuple(v) for k, v in model['slices'].items()}
 
-    print('載入特徵快取……')
+    print('載入特徵快取……', flush=True)
     feats, sift = F.cedar_features(), F.cedar_sift()
     sigmas = {fam: np.array(v) for fam, v in model['sigmas'].items()}
 
-    print(f'建立評估試驗（{len(list(T.EVAL_USERS))} 位寫者，每人 {N_REF} 張已知樣本）……')
-    trials = build_eval_trials(feats, sift, sigmas, np.random.default_rng(T.SEED))
+    print(f'建立評估試驗（{len(list(T.EVAL_USERS))} 位寫者，每人 {N_REF} 張已知樣本）……', flush=True)
+    trials = cached_trials(feats, sift, sigmas)
     for k, v in trials.items():
-        print(f'  {k:<8}{len(v):>6} 個試驗')
+        print(f'  {k:<8}{len(v):>6} 個試驗', flush=True)
 
     results = evaluate(trials, coef, intercept, calib)
-    print(f'\n{"組合":<12}{"Cllr":>8}{"EER":>10}')
+    print(f'\n{"組合":<12}{"Cllr":>8}{"EER":>10}', flush=True)
     for name, r in results.items():
-        print(f'{name:<12}{r["cllr"]:>8.3f}{r["eer"]:>10.1%}')
+        print(f'{name:<12}{r["cllr"]:>8.3f}{r["eer"]:>10.1%}', flush=True)
 
     ablation = {}
     if '--no-ablation' not in sys.argv:
-        print('\n逐族消融（拿掉該族後重訓 + 重新校準）……')
-        rng = np.random.default_rng(T.SEED)
-        Xtr, ytr, gtr = T.sample_pairs(feats, sift, sigmas, T.TRAIN_USERS, rng)
-        Xca, yca, _ = T.sample_pairs(feats, sift, sigmas, T.CALIB_USERS, rng)
+        print('\n逐族消融（拿掉該族後重訓 + 重新校準）……', flush=True)
+        Xtr, ytr, gtr = T.cached_pairs(feats, sift, sigmas, T.TRAIN_USERS, 'train')
+        Xca, yca, _ = T.cached_pairs(feats, sift, sigmas, T.CALIB_USERS, 'calib')
         for fam in F.ALL_FAMILIES:
             lo, hi = slices[fam]
             keep = np.r_[np.arange(0, lo), np.arange(hi, Xtr.shape[1])]
@@ -158,6 +176,30 @@ if __name__ == '__main__':
             verdict = '有貢獻' if delta > 0.01 else ('無貢獻' if delta > -0.01 else '拿掉更好')
             print(f'  拿掉 {fam:<8} Cllr(熟練偽造) {ablation[fam]["熟練偽造"]:.3f} '
                   f'（{delta:+.3f}）{verdict}')
+
+    if '--subsets' in sys.argv:
+        print('\n族組合實驗（重訓 + 重新校準，Cllr 為熟練偽造組）……', flush=True)
+        Xtr, ytr, gtr = T.cached_pairs(feats, sift, sigmas, T.TRAIN_USERS, 'train')
+        Xca, yca, _ = T.cached_pairs(feats, sift, sigmas, T.CALIB_USERS, 'calib')
+        subsets = [
+            ('全部 8 族', F.ALL_FAMILIES),
+            ('不含 HOG', [f for f in F.ALL_FAMILIES if f != 'HOG']),
+            ('不含 HOG、LBP', [f for f in F.ALL_FAMILIES if f not in ('HOG', 'LBP')]),
+            ('不含 HOG、LBP、SIFT', [f for f in F.ALL_FAMILIES if f not in ('HOG', 'LBP', 'SIFT')]),
+            ('幾何+方向+小波+GLCM', ['幾何', '方向分布', '小波', 'GLCM']),
+            ('方向+小波+GLCM（無幾何）', ['方向分布', '小波', 'GLCM']),
+            ('幾何+方向+GLCM', ['幾何', '方向分布', 'GLCM']),
+            ('只有 GLCM', ['GLCM']),
+            ('只有幾何', ['幾何']),
+        ]
+        print(f'{"組合":<26}{"維度":>6}{"非零":>6}{"Cllr 熟練":>10}{"Cllr 隨機":>10}{"EER 熟練":>10}', flush=True)
+        for label, fams in subsets:
+            keep = np.concatenate([np.arange(*slices[f]) for f in fams])
+            c, b0, cal = refit(Xtr, ytr, gtr, Xca, yca, keep, model['hyperparams'])
+            r = evaluate({k: v[:, keep] for k, v in trials.items()}, c, b0, cal)
+            print(f'{label:<26}{len(keep):>6}{int((c != 0).sum()):>6}'
+                  f'{r["熟練偽造"]["cllr"]:>10.3f}{r["隨機不同人"]["cllr"]:>10.3f}'
+                  f'{r["熟練偽造"]["eer"]:>10.1%}', flush=True)
 
     plt.rcParams.update({'font.family': 'PingFang TC', 'font.size': 10, 'axes.edgecolor': '#c3c2b7',
                          'text.color': '#0b0b0b', 'axes.labelcolor': '#52514e',
@@ -185,7 +227,7 @@ if __name__ == '__main__':
                  f'原型數字，不可用於實際案件', x=0.01, ha='left', fontsize=13)
     fig.tight_layout()
     fig.savefig(REPORT, dpi=130, bbox_inches='tight', facecolor='#fcfcfb')
-    print(f'\n圖已存 {REPORT.name}')
+    print(f'\n圖已存 {REPORT.name}', flush=True)
 
     # 驗證摘要寫回模型檔，鑑識版頁面會顯示
     model['validation'] = {
@@ -196,4 +238,4 @@ if __name__ == '__main__':
         'ablation_cllr_skilled': {k: float(v['熟練偽造']) for k, v in ablation.items()} or None,
     }
     (ROOT / 'models/forensic.json').write_text(json.dumps(model, ensure_ascii=False, indent=1))
-    print('驗證摘要已寫回 models/forensic.json')
+    print('驗證摘要已寫回 models/forensic.json', flush=True)
