@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>降維方法比較</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;700&family=Barlow+Condensed:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#f2f2f3;--text:#1d1f20;--accent:#5980a6;--divider:color-mix(in srgb,#1d1f20 16%,transparent);
+  --n100:#f5f5f8;--n200:#e7e7ea;--n300:#d4d4d7;--n500:#98989b;--n700:#5d5d60;--n800:#424244;--n900:#2b2b2d;
+  --a100:#eef6ff;--a200:#d6ebff;--a300:#b5d9fd;--a400:#94bce3;--a600:#597ea3;--a700:#416180;--a800:#2c455d;--a900:#1d2d3d;
+  --fh:"Barlow Condensed",system-ui,sans-serif;--fb:"Barlow",system-ui,sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--fb);font-size:15px;line-height:1.55}
+h1{font-family:var(--fh);font-weight:600;line-height:1.12;letter-spacing:-.015em;margin:0;font-size:40px;text-wrap:balance}
+a{color:var(--a700);text-underline-offset:3px}a:hover{color:var(--a900)}
+:focus{outline:none}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.bp{position:relative;border:1px solid var(--divider)}
+.bp>.c{position:absolute;width:11px;height:11px;color:color-mix(in srgb,var(--text) 55%,transparent)}
+.bp>.c::before,.bp>.c::after{content:"";position:absolute;background:currentColor}
+.bp>.c::before{left:5px;top:0;width:1px;height:100%}
+.bp>.c::after{top:5px;left:0;width:100%;height:1px}
+.c.tl{top:-6px;left:-6px}.c.tr{top:-6px;right:-6px}.c.bl{bottom:-6px;left:-6px}.c.br{bottom:-6px;right:-6px}
+
+.kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px}
+.tag-accent{background:var(--a100);color:var(--a800)}
+.tag-neutral{background:var(--n100);color:var(--n800)}
+.tag-outline{border:1px solid var(--accent);color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-family:var(--fh);font-weight:600;font-size:14px;line-height:1.2;color:var(--text);background:transparent;border:1px solid var(--divider);padding:9px 14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.btn-primary:hover:not(:disabled){background:var(--a600)}.btn-primary:active{background:var(--a700)}
+.muted{font-size:12px;color:var(--n700)}
+
+header{display:flex;align-items:center;gap:14px;padding:14px 32px;border-bottom:1px solid var(--divider)}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;font-family:var(--fh);font-weight:600;font-size:18px}
+.brand-mark{display:inline-grid;place-items:center;width:26px;height:26px;border:1px solid var(--accent);color:var(--accent);font-size:13px}
+header a{font-size:12px}
+main{max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-direction:column;gap:24px}
+
+.intro{display:flex;flex-direction:column;gap:12px}
+.intro-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px}
+.intro p{margin:0;font-size:15px;line-height:1.7;color:var(--n800);max-width:80ch;text-wrap:pretty}
+.cgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+@media (max-width:960px){.cgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.cgrid{grid-template-columns:minmax(0,1fr)}}
+.cm{display:flex;flex-direction:column}
+.cm.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.cm-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--divider)}
+.cm-name{font-family:var(--fh);font-weight:600;font-size:18px;margin-right:auto}
+.cm-plot{position:relative;width:100%;aspect-ratio:4/3}
+.cm-plot canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.cm-foot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--divider)}
+.cm-foot div{display:flex;flex-direction:column;gap:2px;padding:8px 12px}
+.cm-foot div+div{border-left:1px solid var(--divider)}
+.cm-foot b{font-variant-numeric:tabular-nums;font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:18px;font-size:13px}
+.li{display:inline-flex;align-items:center;gap:8px}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-mark">SIG</span><span>墨水／筆跡混用偵測</span></div>
+  <a href="index.html">← 回主畫面</a>
+  <span class="tag tag-outline">DEMO</span>
+</header>
+
+<main>
+  <section class="intro">
+    <span class="kicker">方法比較</span>
+    <div class="intro-row">
+      <h1>同一批樣本，6 種降維方法誰分得最好？</h1>
+      <button type="button" class="btn btn-primary bp" id="compareBtn">
+        <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        執行方法比較
+      </button>
+    </div>
+    <p>每種方法都把主畫面那批樣本降到 2 維，再用 KMeans 分成兩群。<b>自動挑選只看 SI（輪廓係數）</b>——它不需要知道真實來源，真實案件也算得出來。NMI 需要答案，這裡只用來驗證自動挑的對不對。LDA 是監督式方法（要先知道答案才能算），所以不列入。</p>
+    <div class="legend">
+      <span class="li"><i class="dot" style="background:var(--a400)"></i>文件原本來源</span>
+      <span class="li"><i class="dot" style="background:var(--text)"></i>疑似竄改插入</span>
+      <span class="li">● ■ = KMeans 分出的兩群</span>
+    </div>
+    <p class="muted" id="compareStatus">尚未執行</p>
+  </section>
+
+  <div class="cgrid" id="compareGrid"></div>
+</main>
+
+<script>
+let cmp = null;
+const $ = id => document.getElementById(id);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function hull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.slice().reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+
+function drawMini(cv, points, colors, shapes) {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 18, r = 4.5, bg = cssVar('--bg');
+  const sx = x => pad + (x - minX) / ((maxX - minX) || 1) * (W - 2 * pad);
+  const sy = y => H - pad - (y - minY) / ((maxY - minY) || 1) * (H - 2 * pad);
+
+  const hc = [cssVar('--accent'), cssVar('--n800')];
+  [0, 1].forEach(k => {
+    const h = hull(points.filter((_, i) => shapes[i] === k).map(p => [sx(p[0]), sy(p[1])]));
+    if (h.length < 3) return;
+    ctx.beginPath();
+    h.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.closePath(); ctx.lineJoin = 'round';
+    ctx.globalAlpha = .12; ctx.fillStyle = hc[k]; ctx.fill();
+    ctx.globalAlpha = .8; ctx.strokeStyle = hc[k]; ctx.lineWidth = 1; ctx.stroke();
+    ctx.globalAlpha = 1;
+  });
+
+  points.forEach((p, i) => {
+    const cx = sx(p[0]), cy = sy(p[1]);
+    ctx.beginPath();
+    if (shapes[i] === 1) ctx.rect(cx - r, cy - r, r * 2, r * 2);
+    else ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = colors[i]; ctx.fill();
+    ctx.strokeStyle = bg; ctx.lineWidth = 1.2; ctx.stroke();
+  });
+}
+
+function compareOrder() {
+  return cmp.methods.map((_, i) => i).sort((a, b) => cmp.methods[b].metrics.SI - cmp.methods[a].metrics.SI);
+}
+
+function drawCompare() {
+  if (!cmp) return;
+  const cols = [cssVar('--a400'), cssVar('--text')];
+  const colors = cmp.true_source.map(s => cols[s]);
+  const order = compareOrder();
+  $('compareGrid').querySelectorAll('canvas').forEach((cv, j) => {
+    const m = cmp.methods[order[j]];
+    drawMini(cv, m.points, colors, m.kmeans_labels);
+  });
+}
+
+function renderCompare() {
+  $('compareGrid').innerHTML = compareOrder().map((i, rank) => {
+    const m = cmp.methods[i], best = i === cmp.best;
+    return `<div class="cm bp${best ? ' best' : ''}">
+      <div class="cm-head"><span class="muted">#${rank + 1}</span><span class="cm-name">${m.name}</span><span class="tag tag-neutral">${m.kind}</span>${best ? '<span class="tag tag-accent">自動選出</span>' : ''}</div>
+      <div class="cm-plot"><canvas></canvas></div>
+      <div class="cm-foot">
+        <div><span class="muted">SI · 排名依據</span><b>${m.metrics.SI.toFixed(2)}</b></div>
+        <div><span class="muted">NMI · 對答案</span><b>${m.metrics.NMI.toFixed(2)}</b></div>
+        <div><span class="muted">耗時</span><b>${(m.seconds * 1000).toFixed(0)} ms</b></div>
+      </div>
+    </div>`;
+  }).join('');
+  drawCompare();
+}
+
+async function runCompare() {
+  $('compareBtn').disabled = true;
+  $('compareStatus').textContent = '計算中…';
+  try {
+    const res = await fetch('static-data/compare-methods.json');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    cmp = await res.json();
+  } catch (e) {
+    $('compareStatus').textContent = '執行失敗：' + e.message + '';
+    $('compareBtn').disabled = false;
+    return;
+  }
+  const b = cmp.methods[cmp.best];
+  $('compareStatus').textContent = `自動選出 ${b.name}（SI 最高，${b.metrics.SI.toFixed(2)}）；對答案的 NMI 為 ${b.metrics.NMI.toFixed(2)}。`;
+  $('compareBtn').disabled = false;
+  renderCompare();
+}
+
+$('compareBtn').addEventListener('click', runCompare);
+new ResizeObserver(drawCompare).observe($('compareGrid'));
+</script>
+</body>
+</html>

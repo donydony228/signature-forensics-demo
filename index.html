@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>墨水／筆跡混用偵測 demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;700&family=Barlow+Condensed:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#f2f2f3;--text:#1d1f20;--accent:#5980a6;--divider:color-mix(in srgb,#1d1f20 16%,transparent);
+  --n100:#f5f5f8;--n200:#e7e7ea;--n300:#d4d4d7;--n500:#98989b;--n700:#5d5d60;--n800:#424244;--n900:#2b2b2d;
+  --a100:#eef6ff;--a200:#d6ebff;--a300:#b5d9fd;--a400:#94bce3;--a600:#597ea3;--a700:#416180;--a800:#2c455d;--a900:#1d2d3d;
+  --fh:"Barlow Condensed",system-ui,sans-serif;--fb:"Barlow",system-ui,sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--fb);font-size:15px;line-height:1.55}
+h1,h4{font-family:var(--fh);font-weight:600;line-height:1.12;letter-spacing:-.015em;margin:0}
+h1{font-size:44px;text-wrap:balance}h4{font-size:20px}
+a{color:var(--a700);text-underline-offset:3px}a:hover{color:var(--a900)}
+:focus{outline:none}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+
+.bp{position:relative;border:1px solid var(--divider)}
+.bp>.c{position:absolute;width:11px;height:11px;color:color-mix(in srgb,var(--text) 55%,transparent)}
+.bp>.c::before,.bp>.c::after{content:"";position:absolute;background:currentColor}
+.bp>.c::before{left:5px;top:0;width:1px;height:100%}
+.bp>.c::after{top:5px;left:0;width:100%;height:1px}
+.c.tl{top:-6px;left:-6px}.c.tr{top:-6px;right:-6px}.c.bl{bottom:-6px;left:-6px}.c.br{bottom:-6px;right:-6px}
+
+.kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px}
+.tag-accent{background:var(--a100);color:var(--a800)}
+.tag-neutral{background:var(--n100);color:var(--n800)}
+.tag-outline{border:1px solid var(--accent);color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-family:var(--fh);font-weight:600;font-size:14px;line-height:1.2;color:var(--text);background:transparent;border:1px solid var(--divider);padding:9px 14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.btn-primary:hover:not(:disabled){background:var(--a600)}.btn-primary:active{background:var(--a700)}
+.btn-secondary:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
+.btn-secondary:active{background:color-mix(in srgb,var(--text) 14%,transparent)}
+[hidden]{display:none!important}
+
+header{display:flex;align-items:center;gap:14px;padding:14px 32px;border-bottom:1px solid var(--divider)}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;font-family:var(--fh);font-weight:600;font-size:18px}
+.brand-mark{display:inline-grid;place-items:center;width:26px;height:26px;border:1px solid var(--accent);color:var(--accent);font-size:13px}
+header a{font-size:12px}
+main{max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-direction:column;gap:36px}
+.intro{display:flex;flex-direction:column;gap:12px}
+.intro p{margin:0;font-size:15px;line-height:1.7;color:var(--n800);text-wrap:pretty}
+
+/* 步驟列：兩組並排、只留編號與標題，捲到收斂圖時黏在畫面頂端，看動畫時也看得到步驟推進 */
+.groups{position:sticky;top:0;z-index:5;background:var(--bg);display:grid;grid-template-columns:minmax(0,3fr) minmax(0,5fr);gap:6px 20px;margin:0 -32px;padding:10px 32px 8px;border-bottom:1px solid var(--divider)}
+@media (max-width:900px){.groups{grid-template-columns:minmax(0,1fr)}}
+.group{display:flex;flex-direction:column;gap:6px;min-width:0}
+.group-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.group-head h4{font-size:15px}
+.group-count{margin-left:auto;font-family:var(--fh);font-weight:600;font-size:13px;color:var(--a800)}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+#swSteps{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:480px){.steps,#swSteps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.step{padding:6px 8px;display:flex;flex-direction:column;gap:1px;border-top:4px solid var(--n200);margin-right:2px;min-width:0}
+.step.done{border-top-color:var(--accent)}
+.step.active{border-top-color:var(--a700);background:var(--a100)}
+.step-num{font-family:var(--fh);font-weight:600;font-size:12px;letter-spacing:.08em;color:var(--n800)}
+.step.active .step-num{color:var(--a800)}
+.step-title{font-family:var(--fh);font-weight:600;font-size:15px;line-height:1.25;overflow-wrap:anywhere}
+.step-now{grid-column:1/-1;margin:0;font-size:13px;line-height:1.5;color:var(--n800);min-height:1.5em}
+.step-now b{font-family:var(--fh);font-weight:600;color:var(--a800)}
+
+.action{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px;min-height:118px}
+.action-text{display:flex;flex-direction:column;gap:6px;flex:1 1 360px;min-width:0}
+.action-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:22px}
+.action-title{font-family:var(--fh);font-weight:600;font-size:20px;line-height:1.2}
+.action-body{margin:0;font-size:13px;opacity:.8}
+.action-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+.board{display:flex;flex-wrap:wrap;gap:28px;align-items:stretch}
+figure{flex:2 1 520px;min-width:0;margin:0;display:flex;flex-direction:column}
+.fig-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--divider)}
+.muted{font-size:12px;color:var(--n700)}
+.plot{position:relative;width:100%;aspect-ratio:4/3;flex:1 1 auto}
+.plot canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.overlay{position:absolute;inset:0;display:grid;place-items:center}
+.idle-box{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:24px;background:var(--bg)}
+.idle-box b{font-family:var(--fh);font-weight:600;font-size:22px}
+.loading-box{font-family:var(--fh);font-weight:600;font-size:18px;color:var(--a700);background:var(--bg);padding:8px 14px;border:1px solid var(--divider)}
+.fig-foot{display:flex;align-items:center;gap:14px;padding:12px 16px;border-top:1px solid var(--divider)}
+.ticks{display:flex;gap:3px;flex:1}.ticks span{flex:1;height:6px;background:var(--n200)}
+.iter{font-family:var(--fh);font-weight:600;font-size:14px;letter-spacing:.04em;white-space:nowrap}
+
+aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
+.card{display:flex;flex-direction:column;gap:12px;padding:18px}
+.legend{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.legend-items{display:flex;flex-direction:column;gap:10px;font-size:13px}
+.legend-items>div{display:flex;flex-direction:column;gap:10px;transition:opacity .3s}
+.li{display:flex;align-items:center;gap:10px;transition:opacity .3s}
+.lh{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--n700)}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+.sw{width:16px;height:12px;display:grid;place-items:center;flex:none}
+.legend-note{margin:0;padding-left:14px;border-left:1px solid var(--divider);font-size:12.5px;line-height:1.7;color:var(--n800);text-wrap:pretty}
+.metrics{flex:1 1 auto;gap:10px}
+.m-row{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--divider)}
+.m-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.m-key{font-family:var(--fh);font-weight:600;font-size:16px;margin-right:8px}
+.m-val{font-variant-numeric:tabular-nums;font-weight:500}
+.m-bar{height:6px;background:var(--n200);position:relative}
+.m-bar i{position:absolute;left:0;top:0;bottom:0;width:100%;transform:scaleX(0);transform-origin:left;background:var(--accent);transition:transform .6s}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-mark">SIG</span><span>墨水／筆跡混用偵測</span></div>
+  <span class="tag tag-outline">DEMO</span>
+  <a href="https://doi.org/10.1016/j.forsciint.2020.110194" target="_blank" rel="noopener">Forensic Sci Int 311 (2020) 110194</a>
+</header>
+
+<main>
+  <section class="intro">
+    <span class="kicker">高光譜影像 · 非監督式降維 t-SNE</span>
+    <h1>同一份文件裡，是否混用了不只一種墨水或筆跡？</h1>
+    <p>以高光譜相機非破壞性掃描整份文件，從每個墨水區塊取出完整光譜。肉眼看起來同色的墨水，光譜上仍然不同。軟體對整批光譜做 t-SNE 降維——<b>不使用任何身分標籤</b>，純粹看樣本會不會自己分成不只一群；多出一群，就是文件混用墨水的訊號。</p>
+  </section>
+
+  <section class="groups">
+    <div class="group">
+      <div class="group-head"><span class="tag tag-accent">硬體</span><h4>取像與校正 · HySpex VNIR-1800 + HySpex RAD</h4><span class="group-count" id="hwCount"></span></div>
+      <div class="steps" id="hwSteps"></div>
+    </div>
+    <div class="group">
+      <div class="group-head"><span class="tag tag-accent">軟體</span><h4>分析 · 搭售解決方案</h4><span class="group-count" id="swCount"></span></div>
+      <div class="steps" id="swSteps"></div>
+    </div>
+    <p class="step-now" id="stepNow"></p>
+  </section>
+
+  <section class="action bp">
+    <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+    <div class="action-text">
+      <div class="action-top">
+        <span class="kicker">操作</span>
+        <span class="muted" id="errorMsg" hidden></span>
+      </div>
+      <div class="action-title" id="actionTitle"></div>
+      <p class="action-body" id="actionBody"></p>
+    </div>
+    <div class="action-btns">
+      <button type="button" class="btn btn-primary bp" id="revealBtn" hidden>
+        <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+        揭曉真實來源 + 播放 KMeans
+      </button>
+      <button type="button" class="btn btn-secondary" id="rerunBtn" hidden>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        重新執行
+      </button>
+      <a class="btn btn-secondary" href="compare.html" style="text-decoration:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        降維方法比較
+      </a>
+    </div>
+  </section>
+
+  <section class="board">
+    <figure class="bp">
+      <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+      <div class="fig-head"><span class="kicker" id="figTitle"></span><span class="muted" id="plotStatus"></span></div>
+      <div class="plot" id="plotWrap">
+        <canvas id="plot"></canvas>
+        <div class="overlay" id="idleOverlay">
+          <div class="idle-box">
+            <b>尚未執行分析</b>
+            <span class="muted" style="font-size:13px;max-width:34ch">按下後會跑完整 pipeline，t-SNE 每個快照都會重算，需要稍等。</span>
+            <button type="button" class="btn btn-primary bp" id="runBtn" style="padding:10px 18px;font-size:15px">
+              <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+              使用 demo 圖片
+            </button>
+          </div>
+        </div>
+        <div class="overlay" id="loadingOverlay" hidden><span class="loading-box" id="loadingLabel"></span></div>
+      </div>
+      <div class="fig-foot"><div class="ticks" id="ticks"></div><span class="iter" id="iterLabel"></span></div>
+    </figure>
+
+    <aside>
+      <div class="card bp">
+        <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+        <span class="kicker">圖例</span>
+        <div class="legend">
+          <div class="legend-items">
+            <span class="li" id="legendNeutral"><i class="dot" style="background:var(--n500)"></i>尚未揭曉來源</span>
+            <div id="legendRevealed" style="opacity:.35">
+              <span class="lh">顏色 = 真實來源</span>
+              <span class="li"><i class="dot" style="background:var(--a400)"></i>文件原本來源</span>
+              <span class="li"><i class="dot" style="background:var(--text)"></i>疑似竄改插入</span>
+              <span class="lh" style="margin-top:4px">形狀 = KMeans 分群</span>
+              <span class="li"><i class="sw" style="background:var(--a200);border:1.5px solid var(--accent)"><i style="width:6px;height:6px;border-radius:50%;background:var(--text)"></i></i>第一群 ●</span>
+              <span class="li"><i class="sw" style="background:var(--n200);border:1.5px solid var(--n800)"><i style="width:6px;height:6px;background:var(--text)"></i></i>第二群 ■</span>
+              <span class="li"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1L11 11M1 11L11 1" stroke="var(--a900)" stroke-width="2"/></svg>每一步的群中心</span>
+            </div>
+          </div>
+          <p class="legend-note">形狀跟顏色對得起來，代表 KMeans 真的把竄改區塊抓出來了；對不起來就代表分群失敗。真實案件不會有顏色這個答案，這裡只是驗證流程本身有沒有抓到異常。</p>
+        </div>
+      </div>
+
+      <div class="card metrics bp">
+        <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+        <span class="kicker">t-SNE 分群品質</span>
+        <span class="muted">KMeans (k=2) 在 t-SNE 嵌入上的分群，對照真實來源</span>
+        <div id="metrics"></div>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<script>
+// ---- config ----
+const TRANSITION_MS = 900;   // 每段動畫長度
+const POINT_SIZE = 6;        // 點半徑 px
+const SHOW_GRID = true;
+const SHOW_HULLS = true;     // KMeans 每步的半透明群色塊
+
+const STEPS = [
+  { num: '01', title: '高光譜取像', desc: '推掃式相機掃描文件，400–1000 nm 共 186 個波段' },
+  { num: '02', title: '取像環境控制', desc: '文件置於移動載台，兩盞鹵素燈 45° 照明，參考標準板同場拍攝' },
+  { num: '03', title: '輻射校正', desc: 'HySpex RAD 將原始影像轉為絕對輻射亮度，修正非均勻性與暗電流' },
+  { num: '04', title: '反射率正規化', desc: '以已知反射率的參考標準板換算每個像素的絕對反射率' },
+  { num: '05', title: '墨水光譜擷取', desc: '從各墨水區塊取出光譜向量，整批一起分析' },
+  { num: '06', title: 't-SNE 降維', desc: '把高維光譜壓到 2 維，保留非線性相似關係' },
+  { num: '07', title: 'KMeans 分群', desc: '在 2 維嵌入上疊代分群，找出異常來源' },
+  { num: '08', title: '分群品質評估', desc: 'SI / NMI / HI / CI 四項指標量化結果' },
+];
+const METRIC_NAMES = { SI: '輪廓係數 Silhouette', NMI: '標準化互資訊', HI: '同質性 Homogeneity', CI: '完整性 Completeness' };
+const ACTIONS = {
+  idle: ['開始分析', '執行 demo pipeline：特徵擷取 → t-SNE 降維 → KMeans 分群。'],
+  loading: ['取像與前處理中', '模擬 HySpex 取像、輻射校正與反射率正規化，接著擷取墨水光譜。'],
+  tsne: ['t-SNE 收斂中', '所有點都是灰色——此時系統不知道任何來源標籤，只看樣本自己會不會分群。'],
+  tsneDone: ['收斂完成', '畫面已分出群聚。揭曉真實來源，並播放 KMeans 在這個結果上的疊代過程。'],
+  kmeans: ['KMeans 疊代中', '顏色是真實來源；形狀是 KMeans 目前的分群結果。'],
+  done: ['分析完成', '比對形狀與顏色是否一致，並查看右側的分群指標。'],
+  error: ['執行失敗', '無法取得分析結果，請確認後端服務正在執行後重試。'],
+};
+
+// ---- state ----
+const S = { phase: 'idle', seg: 0, kstep: 0, pre: 0, error: '' };
+let data = null, bounds = null, lastFrame = { points: [] }, raf = 0, preTimer = 0;
+
+const $ = id => document.getElementById(id);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const canvas = $('plot'), wrap = $('plotWrap');
+
+function set(patch) { Object.assign(S, patch); render(); }
+
+// ---- UI ----
+function render() {
+  const { phase, seg, kstep, pre } = S;
+  const doneN = { idle: 0, error: 0, loading: pre, tsne: 5, tsneDone: 6, kmeans: 6, done: 8 }[phase];
+  const activeI = { loading: pre, tsne: 5, kmeans: 6 }[phase] ?? -1;
+  const stepHtml = (s, i) => {
+    const done = i < doneN, active = i === activeI;
+    const label = s.num + (done ? ' · 完成' : active ? ' · 進行中' : '');
+    return `<div class="step${done ? ' done' : ''}${active ? ' active' : ''}" title="${s.desc}"><span class="step-num">${label}</span><span class="step-title">${s.title}</span></div>`;
+  };
+  // 01–03 由 HySpex 相機與 HySpex RAD 完成；04 反射率正規化起由分析軟體負責（論文中是研究者自己算的）
+  $('hwSteps').innerHTML = STEPS.slice(0, 3).map((s, i) => stepHtml(s, i)).join('');
+  $('swSteps').innerHTML = STEPS.slice(3).map((s, i) => stepHtml(s, i + 3)).join('');
+  $('hwCount').textContent = `完成 ${Math.min(doneN, 3)} / 3`;
+  $('swCount').textContent = `完成 ${Math.max(doneN - 3, 0)} / 5`;
+  const cur = STEPS[activeI], next = STEPS[6];
+  $('stepNow').innerHTML =
+    cur ? `<b>進行中 · ${cur.num} ${cur.title}</b>　${cur.desc}`
+    : phase === 'tsneDone' ? `<b>下一步 · ${next.num} ${next.title}</b>　${next.desc}`
+    : phase === 'done' ? '<b>8 個步驟全部完成</b>'
+    : phase === 'error' ? '<b>執行中斷</b>'
+    : '<b>尚未開始</b>　按下「使用 demo 圖片」後會依序跑完 8 個步驟';
+
+  const [t, b] = ACTIONS[phase];
+  $('actionTitle').textContent = t;
+  $('actionBody').textContent = b;
+  $('errorMsg').hidden = !S.error;
+  $('errorMsg').textContent = S.error ? '錯誤：' + S.error : '';
+  $('revealBtn').hidden = !(phase === 'tsneDone' || phase === 'kmeans');
+  $('revealBtn').disabled = phase === 'kmeans';
+  $('rerunBtn').hidden = !(phase === 'tsneDone' || phase === 'done' || phase === 'error');
+
+  $('idleOverlay').hidden = phase !== 'idle';
+  $('loadingOverlay').hidden = phase !== 'loading';
+  const ps = STEPS[Math.min(pre, 4)];
+  $('loadingLabel').textContent = `${ps.num} ${ps.title}…`;
+
+  const inK = phase === 'kmeans' || phase === 'done';
+  $('figTitle').textContent = 'Fig. 1 — ' + (inK ? 't-SNE 嵌入 + KMeans 分群' : 't-SNE 收斂過程');
+  const kN = data ? data.kmeans_frames.length : 0, tN = data ? data.frames.length - 1 : 9;
+  let status = '等待執行', iter = 'max_iter —';
+  if (phase === 'loading') status = '計算中…';
+  if (phase === 'error') status = '執行失敗';
+  if (phase === 'tsne') { status = `收斂中（尚未知道任何來源標籤）· 第 ${seg + 1}/${tN} 段`; iter = `max_iter ${data.iters[seg]} → ${data.iters[seg + 1]}`; }
+  if (phase === 'tsneDone') { status = 't-SNE 收斂完成'; iter = `max_iter ${data.iters[data.iters.length - 1]}`; }
+  if (phase === 'kmeans') { status = `KMeans 疊代中 · 第 ${kstep + 1}/${Math.max(kN - 1, 1)} 步`; iter = `KMeans step ${kstep + 1}`; }
+  if (phase === 'done') { status = `KMeans 收斂完成（共 ${kN} 步疊代）`; iter = `KMeans ${kN} steps`; }
+  $('plotStatus').textContent = status;
+  $('iterLabel').textContent = iter;
+
+  const nT = inK ? Math.max(kN - 1, 1) : tN;
+  const filled = inK ? (phase === 'done' ? nT : kstep) : (phase === 'tsneDone' ? tN : phase === 'tsne' ? seg : 0);
+  const running = phase === 'tsne' || phase === 'kmeans';
+  $('ticks').innerHTML = Array.from({ length: nT }, (_, i) => {
+    const bg = i < filled ? (inK ? 'var(--text)' : 'var(--accent)') : (i === filled && running ? 'var(--a300)' : 'var(--n200)');
+    return `<span style="background:${bg}"></span>`;
+  }).join('');
+
+  $('legendNeutral').style.opacity = inK ? .35 : 1;
+  $('legendRevealed').style.opacity = inK ? 1 : .35;
+
+  const done = phase === 'done';
+  const keys = data ? Object.keys(data.tsne_metrics) : ['SI', 'NMI', 'HI', 'CI'];
+  $('metrics').innerHTML = keys.map(k => {
+    const v = done ? data.tsne_metrics[k] : null;
+    return `<div class="m-row"><div class="m-top"><span><span class="m-key">${k}</span><span class="muted">${METRIC_NAMES[k] || ''}</span></span><span class="m-val">${v === null ? '—' : v.toFixed(2)}</span></div><span class="m-bar"><i style="transform:scaleX(${v === null ? 0 : Math.max(0, Math.min(1, v))})"></i></span></div>`;
+  }).join('');
+}
+
+// ---- canvas ----
+function hull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.slice().reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+
+function draw(frame) {
+  lastFrame = frame;
+  const dpr = window.devicePixelRatio || 1, W = wrap.clientWidth, H = wrap.clientHeight;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (SHOW_GRID) {
+    ctx.strokeStyle = cssVar('--n200'); ctx.lineWidth = 1;
+    const n = 12;
+    for (let i = 1; i < n; i++) {
+      const x = Math.round(W * i / n) + .5, y = Math.round(H * i / n) + .5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+  }
+  if (!bounds || !frame.points.length) return;
+  const pad = 32, r = POINT_SIZE, bg = cssVar('--bg');
+  const sx = x => pad + (x - bounds.minX) / (bounds.maxX - bounds.minX) * (W - 2 * pad);
+  const sy = y => H - pad - (y - bounds.minY) / (bounds.maxY - bounds.minY) * (H - 2 * pad);
+
+  if (frame.shapes && SHOW_HULLS) {
+    const cols = [cssVar('--accent'), cssVar('--n800')];
+    [0, 1].forEach(k => {
+      const pts = frame.points.filter((_, i) => frame.shapes[i] === k).map(p => [sx(p[0]), sy(p[1])]);
+      if (!pts.length) return;
+      const h = hull(pts);
+      const cx = h.reduce((a, p) => a + p[0], 0) / h.length, cy = h.reduce((a, p) => a + p[1], 0) / h.length;
+      const grow = r + 6;
+      const hp = h.map(p => { const dx = p[0] - cx, dy = p[1] - cy, d = Math.hypot(dx, dy) || 1; return [p[0] + dx / d * grow, p[1] + dy / d * grow]; });
+      ctx.beginPath();
+      if (hp.length < 3) ctx.arc(cx, cy, grow + (hp.length === 2 ? Math.hypot(h[0][0] - h[1][0], h[0][1] - h[1][1]) / 2 : 0), 0, Math.PI * 2);
+      else { hp.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); }
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = .14; ctx.fillStyle = cols[k]; ctx.fill();
+      ctx.globalAlpha = .9; ctx.strokeStyle = cols[k]; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  frame.points.forEach((p, i) => {
+    const cx = sx(p[0]), cy = sy(p[1]);
+    ctx.beginPath();
+    if (frame.shapes && frame.shapes[i] === 1) ctx.rect(cx - r, cy - r, r * 2, r * 2);
+    else ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = frame.colors[i]; ctx.fill();
+    ctx.strokeStyle = bg; ctx.lineWidth = 1.5; ctx.stroke();
+  });
+
+  if (frame.centers) {
+    const ink = cssVar('--a900');
+    frame.centers.forEach(c => {
+      const cx = sx(c[0]), cy = sy(c[1]), s = 9;
+      ctx.strokeStyle = bg; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.moveTo(cx - s, cy + s); ctx.lineTo(cx + s, cy - s); ctx.stroke();
+      ctx.strokeStyle = ink; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, 15, 0, Math.PI * 2); ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+    });
+  }
+}
+
+// ---- pipeline ----
+const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+async function run() {
+  cancelAnimationFrame(raf);
+  clearInterval(preTimer);
+  data = null; bounds = null; draw({ points: [] });
+  set({ phase: 'loading', seg: 0, kstep: 0, pre: 0, error: '' });
+  preTimer = setInterval(() => set({ pre: Math.min(S.pre + 1, 4) }), 600);
+  const minWait = new Promise(r => setTimeout(r, 2600));
+  try {
+    const res = await fetch('static-data/analyze-document.json');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    await minWait;
+    data = json;
+  } catch (e) {
+    clearInterval(preTimer);
+    set({ phase: 'error', error: e.message });
+    return;
+  }
+  clearInterval(preTimer);
+  const all = data.frames.flat();
+  bounds = {
+    minX: Math.min(...all.map(p => p[0])), maxX: Math.max(...all.map(p => p[0])),
+    minY: Math.min(...all.map(p => p[1])), maxY: Math.max(...all.map(p => p[1])),
+  };
+  set({ phase: 'tsne', seg: 0 });
+  animTsne();
+}
+
+function animTsne() {
+  const F = data.frames, neutral = F[0].map(() => cssVar('--n500'));
+  let seg = 0, t0 = null;
+  const tick = ts => {
+    if (t0 === null) t0 = ts;
+    const t = ease(Math.min((ts - t0) / TRANSITION_MS, 1)), a = F[seg], b = F[seg + 1];
+    draw({ points: a.map((p, i) => [p[0] + (b[i][0] - p[0]) * t, p[1] + (b[i][1] - p[1]) * t]), colors: neutral });
+    if (t < 1) { raf = requestAnimationFrame(tick); return; }
+    seg++;
+    if (seg < F.length - 1) { t0 = null; set({ seg }); raf = requestAnimationFrame(tick); }
+    else set({ seg, phase: 'tsneDone' });
+  };
+  draw({ points: F[0], colors: neutral });
+  raf = requestAnimationFrame(tick);
+}
+
+function reveal() {
+  if (!data) return;
+  const P = data.frames[data.frames.length - 1], K = data.kmeans_frames;
+  const cols = [cssVar('--a400'), cssVar('--text')];
+  const colors = data.true_source.map(s => cols[s]);
+  set({ phase: 'kmeans', kstep: 0 });
+  if (K.length === 1) {
+    draw({ points: P, colors, shapes: K[0].labels, centers: K[0].centers });
+    set({ phase: 'done', kstep: 1 });
+    return;
+  }
+  let step = 0, t0 = null;
+  const tick = ts => {
+    if (t0 === null) t0 = ts;
+    const t = ease(Math.min((ts - t0) / TRANSITION_MS, 1)), a = K[step].centers, b = K[step + 1].centers;
+    draw({ points: P, colors, shapes: K[step].labels, centers: a.map((c, i) => [c[0] + (b[i][0] - c[0]) * t, c[1] + (b[i][1] - c[1]) * t]) });
+    if (t < 1) { raf = requestAnimationFrame(tick); return; }
+    step++;
+    if (step < K.length - 1) { t0 = null; set({ kstep: step }); raf = requestAnimationFrame(tick); }
+    else {
+      const L = K[K.length - 1];
+      draw({ points: P, colors, shapes: L.labels, centers: L.centers });
+      set({ kstep: K.length, phase: 'done' });
+    }
+  };
+  raf = requestAnimationFrame(tick);
+}
+
+$('runBtn').addEventListener('click', run);
+$('rerunBtn').addEventListener('click', run);
+$('revealBtn').addEventListener('click', reveal);
+new ResizeObserver(() => draw(lastFrame)).observe(wrap);
+render();
+draw(lastFrame);
+</script>
+</body>
+</html>
