@@ -107,6 +107,13 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
 .m-val{font-variant-numeric:tabular-nums;font-weight:500}
 .m-bar{height:6px;background:var(--n200);position:relative}
 .m-bar i{position:absolute;left:0;top:0;bottom:0;width:100%;transform:scaleX(0);transform-origin:left;background:var(--accent);transition:transform .6s}
+.k-row{display:grid;grid-template-columns:36px minmax(0,1fr) 40px;align-items:center;gap:10px;font-size:13px;padding:3px 0}
+.k-row .m-bar i{background:var(--n500)}
+.k-row.best{font-weight:600}.k-row.best .m-bar i{background:var(--accent)}
+.k-row b{font-family:var(--fh);font-weight:600}
+.k-row span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.k-verdict{margin:0;padding-top:10px;border-top:1px solid var(--divider);font-size:13px;line-height:1.6;color:var(--n800);text-wrap:pretty}
+.k-verdict b{color:var(--a800)}
 </style>
 </head>
 <body>
@@ -198,6 +205,7 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
               <span class="lh" style="margin-top:4px">形狀 = KMeans 分群</span>
               <span class="li"><i class="sw" style="background:var(--a200);border:1.5px solid var(--accent)"><i style="width:6px;height:6px;border-radius:50%;background:var(--text)"></i></i>第一群 ●</span>
               <span class="li"><i class="sw" style="background:var(--n200);border:1.5px solid var(--n800)"><i style="width:6px;height:6px;background:var(--text)"></i></i>第二群 ■</span>
+              <span class="muted">群數超過 2 時，依序再用 ▲ ◆ 等形狀</span>
               <span class="li"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1L11 11M1 11L11 1" stroke="var(--a900)" stroke-width="2"/></svg>每一步的群中心</span>
             </div>
           </div>
@@ -205,10 +213,18 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
         </div>
       </div>
 
+      <div class="card bp">
+        <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+        <span class="kicker">群數判定</span>
+        <span class="muted">不看答案：在原始特徵（PCA 10 維）上，用輪廓係數試 k = 2–6，分數最高的就是群數。</span>
+        <div id="kSelect"></div>
+        <p class="k-verdict" id="kVerdict"></p>
+      </div>
+
       <div class="card metrics bp">
         <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
         <span class="kicker">t-SNE 分群品質</span>
-        <span class="muted">KMeans (k=2) 在 t-SNE 嵌入上的分群，對照真實來源</span>
+        <span class="muted" id="metricsSub">KMeans 在 t-SNE 嵌入上的分群，對照真實來源</span>
         <div id="metrics"></div>
       </div>
     </aside>
@@ -320,9 +336,39 @@ function render() {
     const v = done ? data.tsne_metrics[k] : null;
     return `<div class="m-row"><div class="m-top"><span><span class="m-key">${k}</span><span class="muted">${METRIC_NAMES[k] || ''}</span></span><span class="m-val">${v === null ? '—' : v.toFixed(2)}</span></div><span class="m-bar"><i style="transform:scaleX(${v === null ? 0 : Math.max(0, Math.min(1, v))})"></i></span></div>`;
   }).join('');
+
+  // 群數判定：t-SNE 跑完才揭露（它是第 07 步 KMeans 之前的決定）
+  const ks = data && (phase === 'tsneDone' || inK) ? data.k_selection : null;
+  const scores = ks ? Object.entries(ks.silhouette).map(([k, v]) => [Number(k), v]) : [2, 3, 4, 5, 6].map(k => [k, null]);
+  $('kSelect').innerHTML = scores.map(([k, v]) =>
+    `<div class="k-row${ks && k === ks.k ? ' best' : ''}"><b>k=${k}</b><span class="m-bar"><i style="transform:scaleX(${v === null ? 0 : Math.max(0, Math.min(1, v))})"></i></span><span>${v === null ? '—' : v.toFixed(2)}</span></div>`
+  ).join('');
+  $('metricsSub').textContent = `KMeans${ks ? ` (k=${ks.k})` : ''} 在 t-SNE 嵌入上的分群，對照真實來源`;
+  if (!ks) {
+    $('kVerdict').textContent = 't-SNE 收斂後顯示。k = 1（沒有混用）無法用輪廓係數判定，只能看曲線有沒有明顯高峰。';
+  } else {
+    const sorted = scores.map(s => s[1]).sort((a, b) => b - a), lead = (sorted[0] - sorted[1]).toFixed(2);
+    $('kVerdict').innerHTML = ks.clear_peak
+      ? `<b>判定 k = ${ks.k}</b>：分數明顯高過其他 k（領先 ${lead}），群聚結構清楚，文件裡很可能不只一種來源。`
+      : `<b>群聚結構不明顯</b>：分數沒有明顯高峰（只領先 ${lead}），暫以 k = ${ks.k} 作圖，是否混用需要人工判讀。`;
+  }
 }
 
 // ---- canvas ----
+const HULL_COLORS = ['--accent', '--n800', '--a900', '--n500', '--a400', '--n700'];
+
+// 群 0 ● 群 1 ■ 群 2 ▲ 群 3 ◆ 群 4 ▼ 群 5 ⬢
+function markPath(ctx, shape, cx, cy, r) {
+  shape %= 6;
+  if (shape === 0) { ctx.arc(cx, cy, r, 0, Math.PI * 2); return; }
+  if (shape === 1) { ctx.rect(cx - r, cy - r, r * 2, r * 2); return; }
+  const sides = [0, 0, 3, 4, 3, 6][shape], rot = [0, 0, -Math.PI / 2, 0, Math.PI / 2, 0][shape], R = r * 1.3;
+  for (let j = 0; j < sides; j++) {
+    const a = rot + j * 2 * Math.PI / sides, x = cx + R * Math.cos(a), y = cy + R * Math.sin(a);
+    j ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath();
+}
 function hull(pts) {
   const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   if (p.length < 3) return p;
@@ -356,8 +402,8 @@ function draw(frame) {
   const sy = y => H - pad - (y - bounds.minY) / (bounds.maxY - bounds.minY) * (H - 2 * pad);
 
   if (frame.shapes && SHOW_HULLS) {
-    const cols = [cssVar('--accent'), cssVar('--n800')];
-    [0, 1].forEach(k => {
+    const cols = HULL_COLORS.map(cssVar);
+    [...new Set(frame.shapes)].forEach(k => {
       const pts = frame.points.filter((_, i) => frame.shapes[i] === k).map(p => [sx(p[0]), sy(p[1])]);
       if (!pts.length) return;
       const h = hull(pts);
@@ -368,8 +414,8 @@ function draw(frame) {
       if (hp.length < 3) ctx.arc(cx, cy, grow + (hp.length === 2 ? Math.hypot(h[0][0] - h[1][0], h[0][1] - h[1][1]) / 2 : 0), 0, Math.PI * 2);
       else { hp.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); }
       ctx.lineJoin = 'round';
-      ctx.globalAlpha = .14; ctx.fillStyle = cols[k]; ctx.fill();
-      ctx.globalAlpha = .9; ctx.strokeStyle = cols[k]; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.globalAlpha = .14; ctx.fillStyle = cols[k % cols.length]; ctx.fill();
+      ctx.globalAlpha = .9; ctx.strokeStyle = cols[k % cols.length]; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.globalAlpha = 1;
     });
   }
@@ -377,8 +423,7 @@ function draw(frame) {
   frame.points.forEach((p, i) => {
     const cx = sx(p[0]), cy = sy(p[1]);
     ctx.beginPath();
-    if (frame.shapes && frame.shapes[i] === 1) ctx.rect(cx - r, cy - r, r * 2, r * 2);
-    else ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    markPath(ctx, frame.shapes ? frame.shapes[i] : 0, cx, cy, r);
     ctx.fillStyle = frame.colors[i]; ctx.fill();
     ctx.strokeStyle = bg; ctx.lineWidth = 1.5; ctx.stroke();
   });
@@ -397,31 +442,66 @@ function draw(frame) {
 
 // ---- pipeline ----
 const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+const DATA_URL = 'static-data/analyze-document.json';
+
+// 跑完的階段記在 sessionStorage：去比較頁再回來時直接畫最後結果，不用重跑。只在這個分頁有效。
+const STAGE_KEY = 'sig-demo-stage';
+function saveStage(stage) { try { stage ? sessionStorage.setItem(STAGE_KEY, stage) : sessionStorage.removeItem(STAGE_KEY); } catch {} }
+
+function setData(json) {
+  data = json;
+  const all = data.frames.flat();
+  bounds = {
+    minX: Math.min(...all.map(p => p[0])), maxX: Math.max(...all.map(p => p[0])),
+    minY: Math.min(...all.map(p => p[1])), maxY: Math.max(...all.map(p => p[1])),
+  };
+}
+
+function revealColors() {
+  const cols = [cssVar('--a400'), cssVar('--text')];
+  return data.true_source.map(s => cols[s]);
+}
+
+async function restore() {
+  let stage = null;
+  try { stage = sessionStorage.getItem(STAGE_KEY); } catch {}
+  if (stage !== 'tsneDone' && stage !== 'done') return;
+  try {
+    const res = await fetch(DATA_URL);
+    if (!res.ok) return;
+    setData(await res.json());
+  } catch { return; }
+  const P = data.frames[data.frames.length - 1];
+  if (stage === 'tsneDone') {
+    draw({ points: P, colors: P.map(() => cssVar('--n500')) });
+    set({ phase: 'tsneDone', seg: data.frames.length - 1 });
+  } else {
+    const L = data.kmeans_frames[data.kmeans_frames.length - 1];
+    draw({ points: P, colors: revealColors(), shapes: L.labels, centers: L.centers });
+    set({ phase: 'done', kstep: data.kmeans_frames.length });
+  }
+}
 
 async function run() {
   cancelAnimationFrame(raf);
   clearInterval(preTimer);
+  saveStage(null);
   data = null; bounds = null; draw({ points: [] });
   set({ phase: 'loading', seg: 0, kstep: 0, pre: 0, error: '' });
   preTimer = setInterval(() => set({ pre: Math.min(S.pre + 1, 4) }), 600);
   const minWait = new Promise(r => setTimeout(r, 2600));
   try {
-    const res = await fetch('static-data/analyze-document.json');
+    const res = await fetch(DATA_URL);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const json = await res.json();
     await minWait;
-    data = json;
+    setData(json);
   } catch (e) {
     clearInterval(preTimer);
     set({ phase: 'error', error: e.message });
     return;
   }
   clearInterval(preTimer);
-  const all = data.frames.flat();
-  bounds = {
-    minX: Math.min(...all.map(p => p[0])), maxX: Math.max(...all.map(p => p[0])),
-    minY: Math.min(...all.map(p => p[1])), maxY: Math.max(...all.map(p => p[1])),
-  };
   set({ phase: 'tsne', seg: 0 });
   animTsne();
 }
@@ -436,7 +516,7 @@ function animTsne() {
     if (t < 1) { raf = requestAnimationFrame(tick); return; }
     seg++;
     if (seg < F.length - 1) { t0 = null; set({ seg }); raf = requestAnimationFrame(tick); }
-    else set({ seg, phase: 'tsneDone' });
+    else { set({ seg, phase: 'tsneDone' }); saveStage('tsneDone'); }
   };
   draw({ points: F[0], colors: neutral });
   raf = requestAnimationFrame(tick);
@@ -445,12 +525,12 @@ function animTsne() {
 function reveal() {
   if (!data) return;
   const P = data.frames[data.frames.length - 1], K = data.kmeans_frames;
-  const cols = [cssVar('--a400'), cssVar('--text')];
-  const colors = data.true_source.map(s => cols[s]);
+  const colors = revealColors();
   set({ phase: 'kmeans', kstep: 0 });
   if (K.length === 1) {
     draw({ points: P, colors, shapes: K[0].labels, centers: K[0].centers });
     set({ phase: 'done', kstep: 1 });
+    saveStage('done');
     return;
   }
   let step = 0, t0 = null;
@@ -465,6 +545,7 @@ function reveal() {
       const L = K[K.length - 1];
       draw({ points: P, colors, shapes: L.labels, centers: L.centers });
       set({ kstep: K.length, phase: 'done' });
+      saveStage('done');
     }
   };
   raf = requestAnimationFrame(tick);
@@ -476,6 +557,7 @@ $('revealBtn').addEventListener('click', reveal);
 new ResizeObserver(() => draw(lastFrame)).observe(wrap);
 render();
 draw(lastFrame);
+restore();
 </script>
 </body>
 </html>

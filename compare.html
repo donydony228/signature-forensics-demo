@@ -83,11 +83,11 @@ main{max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-dir
         執行方法比較
       </button>
     </div>
-    <p>每種方法都把主畫面那批樣本降到 2 維，再用 KMeans 分成兩群。<b>自動挑選只看 SI（輪廓係數）</b>——它不需要知道真實來源，真實案件也算得出來。NMI 需要答案，這裡只用來驗證自動挑的對不對。LDA 是監督式方法（要先知道答案才能算），所以不列入。</p>
+    <p>每種方法都把主畫面那批樣本降到 2 維，再用 KMeans 分群；群數跟主畫面一樣，是系統不看答案自動判定的。<b>自動挑選只看 SI（輪廓係數）</b>——它不需要知道真實來源，真實案件也算得出來。NMI 需要答案，這裡只用來驗證自動挑的對不對。LDA 是監督式方法（要先知道答案才能算），所以不列入。</p>
     <div class="legend">
       <span class="li"><i class="dot" style="background:var(--a400)"></i>文件原本來源</span>
       <span class="li"><i class="dot" style="background:var(--text)"></i>疑似竄改插入</span>
-      <span class="li">● ■ = KMeans 分出的兩群</span>
+      <span class="li">● ■ ▲ ◆ = KMeans 分出的各群</span>
     </div>
     <p class="muted" id="compareStatus">尚未執行</p>
   </section>
@@ -110,6 +110,19 @@ function hull(pts) {
   return lo.slice(0, -1).concat(up.slice(0, -1));
 }
 
+// 群 0 ● 群 1 ■ 群 2 ▲ 群 3 ◆ 群 4 ▼ 群 5 ⬢（跟主畫面同一套）
+function markPath(ctx, shape, cx, cy, r) {
+  shape %= 6;
+  if (shape === 0) { ctx.arc(cx, cy, r, 0, Math.PI * 2); return; }
+  if (shape === 1) { ctx.rect(cx - r, cy - r, r * 2, r * 2); return; }
+  const sides = [0, 0, 3, 4, 3, 6][shape], rot = [0, 0, -Math.PI / 2, 0, Math.PI / 2, 0][shape], R = r * 1.3;
+  for (let j = 0; j < sides; j++) {
+    const a = rot + j * 2 * Math.PI / sides, x = cx + R * Math.cos(a), y = cy + R * Math.sin(a);
+    j ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath();
+}
+
 function drawMini(cv, points, colors, shapes) {
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
@@ -122,23 +135,22 @@ function drawMini(cv, points, colors, shapes) {
   const sx = x => pad + (x - minX) / ((maxX - minX) || 1) * (W - 2 * pad);
   const sy = y => H - pad - (y - minY) / ((maxY - minY) || 1) * (H - 2 * pad);
 
-  const hc = [cssVar('--accent'), cssVar('--n800')];
-  [0, 1].forEach(k => {
+  const hc = ['--accent', '--n800', '--a900', '--n500', '--a400', '--n700'].map(cssVar);
+  [...new Set(shapes)].forEach(k => {
     const h = hull(points.filter((_, i) => shapes[i] === k).map(p => [sx(p[0]), sy(p[1])]));
     if (h.length < 3) return;
     ctx.beginPath();
     h.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
     ctx.closePath(); ctx.lineJoin = 'round';
-    ctx.globalAlpha = .12; ctx.fillStyle = hc[k]; ctx.fill();
-    ctx.globalAlpha = .8; ctx.strokeStyle = hc[k]; ctx.lineWidth = 1; ctx.stroke();
+    ctx.globalAlpha = .12; ctx.fillStyle = hc[k % hc.length]; ctx.fill();
+    ctx.globalAlpha = .8; ctx.strokeStyle = hc[k % hc.length]; ctx.lineWidth = 1; ctx.stroke();
     ctx.globalAlpha = 1;
   });
 
   points.forEach((p, i) => {
     const cx = sx(p[0]), cy = sy(p[1]);
     ctx.beginPath();
-    if (shapes[i] === 1) ctx.rect(cx - r, cy - r, r * 2, r * 2);
-    else ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    markPath(ctx, shapes[i], cx, cy, r);
     ctx.fillStyle = colors[i]; ctx.fill();
     ctx.strokeStyle = bg; ctx.lineWidth = 1.2; ctx.stroke();
   });

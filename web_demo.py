@@ -94,8 +94,27 @@ def build_document_sample():
 DOC_X, DOC_TRUE_SOURCE = build_document_sample()
 
 
-def cluster_metrics(embedding: np.ndarray, y: np.ndarray):
-    pred = KMeans(n_clusters=len(np.unique(y)), n_init=10, random_state=0).fit_predict(embedding)
+K_CANDIDATES = range(2, 7)
+# ponytail: 「高峰明顯」的門檻只用一組混用、一組單一來源的合成資料定過（0.08 vs 0.01），
+# 真實使用前要用實驗室已知答案的樣本重新校正。
+CLEAR_PEAK_MARGIN = 0.05
+
+
+def choose_k(X: np.ndarray) -> dict:
+    """不看答案決定群數：在 PCA 空間（不是 t-SNE 圖上，t-SNE 會把資料拉成假的團塊）用輪廓係數試 k=2~6。
+    k=1（沒有混用）目前無法可靠地自動判定（gap statistic、GMM+BIC 都在單一來源資料上誤判過），
+    所以只回報曲線有沒有明顯高峰，由人判讀。"""
+    Z = PCA(n_components=min(10, len(X) - 1), random_state=0).fit_transform(X)
+    scores = {k: float(silhouette_score(Z, KMeans(n_clusters=k, n_init=10, random_state=0).fit_predict(Z)))
+              for k in K_CANDIDATES}
+    ranked = sorted(scores, key=scores.get, reverse=True)
+    best, runner_up = ranked[0], ranked[1]
+    clear = best != max(K_CANDIDATES) and scores[best] - scores[runner_up] >= CLEAR_PEAK_MARGIN
+    return {"k": best, "silhouette": scores, "clear_peak": clear, "pca_dims": Z.shape[1]}
+
+
+def cluster_metrics(embedding: np.ndarray, y: np.ndarray, k: int):
+    pred = KMeans(n_clusters=k, n_init=10, random_state=0).fit_predict(embedding)
     metrics = {
         "SI": float(silhouette_score(embedding, pred)),
         "NMI": float(normalized_mutual_info_score(y, pred)),
@@ -133,11 +152,13 @@ def run_pipeline():
     tsne_frames = run_tsne_trajectory(DOC_X)
     tsne_2d = tsne_frames[-1]
 
-    pca_metrics, _ = cluster_metrics(pca_2d, DOC_TRUE_SOURCE)
-    tsne_metrics, tsne_kmeans_labels = cluster_metrics(tsne_2d, DOC_TRUE_SOURCE)
-    kmeans_frames = run_kmeans_trajectory(tsne_2d, k=len(np.unique(DOC_TRUE_SOURCE)))
+    k_selection = choose_k(DOC_X)
+    k = k_selection["k"]
+    pca_metrics, _ = cluster_metrics(pca_2d, DOC_TRUE_SOURCE, k)
+    tsne_metrics, tsne_kmeans_labels = cluster_metrics(tsne_2d, DOC_TRUE_SOURCE, k)
+    kmeans_frames = run_kmeans_trajectory(tsne_2d, k)
 
-    return tsne_frames, pca_metrics, tsne_metrics, tsne_kmeans_labels, kmeans_frames
+    return tsne_frames, pca_metrics, tsne_metrics, tsne_kmeans_labels, kmeans_frames, k_selection
 
 
 # LDA 沒放：它是監督式方法，要先知道真實來源才能算，等於偷看答案。
@@ -153,8 +174,9 @@ DR_METHODS = [
 
 
 def compare_methods(X: np.ndarray, y: np.ndarray):
-    """每種方法都降到 2 維再用 KMeans 分群。排名只看 SI：SI 不需要真實來源，真實案件也算得出來；
+    """每種方法都降到 2 維再用 KMeans 分成 choose_k 判定的群數。排名只看 SI：SI 不需要真實來源，真實案件也算得出來；
     NMI/HI/CI 需要答案，只拿來在 demo 裡驗證自動挑的對不對。"""
+    k = choose_k(X)["k"]
     results = []
     for name, kind, make in DR_METHODS:
         start = time.perf_counter()
@@ -162,13 +184,13 @@ def compare_methods(X: np.ndarray, y: np.ndarray):
             warnings.simplefilter("ignore")  # MDS/Isomap/Spectral 在小資料上會噴不影響結果的提醒
             embedding = make(len(X)).fit_transform(X)
         seconds = time.perf_counter() - start
-        metrics, labels = cluster_metrics(embedding, y)
+        metrics, labels = cluster_metrics(embedding, y, k)
         results.append({
             "name": name, "kind": kind, "seconds": seconds,
             "points": embedding.tolist(), "kmeans_labels": labels.tolist(), "metrics": metrics,
         })
     best = max(range(len(results)), key=lambda i: results[i]["metrics"]["SI"])
-    return results, best
+    return results, best, k
 
 
 app = Flask(__name__, static_folder=None)
@@ -186,7 +208,7 @@ def compare_page():
 
 @app.get("/api/analyze-document")
 def analyze_document():
-    tsne_frames, pca_metrics, tsne_metrics, tsne_kmeans_labels, kmeans_frames = run_pipeline()
+    tsne_frames, pca_metrics, tsne_metrics, tsne_kmeans_labels, kmeans_frames, k_selection = run_pipeline()
 
     return jsonify(
         frames=[frame.tolist() for frame in tsne_frames],
@@ -194,6 +216,7 @@ def analyze_document():
         true_source=DOC_TRUE_SOURCE.tolist(),
         tsne_kmeans_labels=tsne_kmeans_labels.tolist(),
         kmeans_frames=kmeans_frames,
+        k_selection=k_selection,
         pca_metrics=pca_metrics,
         tsne_metrics=tsne_metrics,
     )
@@ -201,24 +224,29 @@ def analyze_document():
 
 @app.get("/api/compare-methods")
 def compare_methods_api():
-    results, best = compare_methods(DOC_X, DOC_TRUE_SOURCE)
-    return jsonify(methods=results, best=best, true_source=DOC_TRUE_SOURCE.tolist())
+    results, best, k = compare_methods(DOC_X, DOC_TRUE_SOURCE)
+    return jsonify(methods=results, best=best, k=k, true_source=DOC_TRUE_SOURCE.tolist())
 
 
 def check():
-    tsne_frames, pca_metrics, tsne_metrics, tsne_kmeans_labels, kmeans_frames = run_pipeline()
+    tsne_frames, pca_metrics, tsne_metrics, tsne_kmeans_labels, kmeans_frames, k_selection = run_pipeline()
 
+    assert k_selection["k"] == 2 and k_selection["clear_peak"], f"混用文件應判定 k=2 且高峰明顯：{k_selection}"
+    single_rng = np.random.default_rng(5)
+    single_doc = np.array([extract_features(make_signature_image(0, single_rng)) for _ in range(len(DOC_X))])
+    assert not choose_k(single_doc)["clear_peak"], "單一來源文件不該被標成群聚結構明顯"
+
+    k = k_selection["k"]
     assert len(tsne_frames) == len(TSNE_SNAPSHOT_ITERS)
     assert all(frame.shape == (len(DOC_X), 2) for frame in tsne_frames)
     assert tsne_kmeans_labels.shape == (len(DOC_X),)
     assert all(0 <= v <= 1 for v in {**pca_metrics, **tsne_metrics}.values())
     assert tsne_metrics["NMI"] > 0.3, "t-SNE 完全沒分出竄改區塊，資料生成或流程可能壞了"
     assert len(kmeans_frames) >= 1
-    assert all(len(f["labels"]) == len(DOC_X) and len(f["centers"]) == 2 for f in kmeans_frames)
-    assert kmeans_frames[-1]["labels"] == tsne_kmeans_labels.tolist() or \
-        [1 - v for v in kmeans_frames[-1]["labels"]] == tsne_kmeans_labels.tolist(), \
+    assert all(len(f["labels"]) == len(DOC_X) and len(f["centers"]) == k for f in kmeans_frames)
+    assert normalized_mutual_info_score(kmeans_frames[-1]["labels"], tsne_kmeans_labels) == 1.0, \
         "KMeans 動畫最後一幀跟表格用的分群結果對不起來"
-    results, best = compare_methods(DOC_X, DOC_TRUE_SOURCE)
+    results, best, _ = compare_methods(DOC_X, DOC_TRUE_SOURCE)
     assert [r["name"] for r in results] == [m[0] for m in DR_METHODS]
     assert all(len(r["points"]) == len(DOC_X) for r in results)
     assert results[best]["metrics"]["SI"] == max(r["metrics"]["SI"] for r in results)
