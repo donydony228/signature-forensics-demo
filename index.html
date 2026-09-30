@@ -25,9 +25,13 @@ a{color:var(--a700);text-underline-offset:3px}a:hover{color:var(--a900)}
 .bp{position:relative;border:1px solid var(--divider)}
 .bp>.c{position:absolute;width:11px;height:11px;color:color-mix(in srgb,var(--text) 55%,transparent)}
 .bp>.c::before,.bp>.c::after{content:"";position:absolute;background:currentColor}
-.bp>.c::before{left:5px;top:0;width:1px;height:100%}
-.bp>.c::after{top:5px;left:0;width:100%;height:1px}
-.c.tl{top:-6px;left:-6px}.c.tr{top:-6px;right:-6px}.c.bl{bottom:-6px;left:-6px}.c.br{bottom:-6px;right:-6px}
+/* 轉角：貼齊框線、只往框內延伸的 L 形，不凸出框外 */
+.bp>.c::before{top:0;width:1px;height:100%}
+.bp>.c::after{left:0;width:100%;height:1px}
+.c.tl{top:-1px;left:-1px}.c.tl::before{left:0}.c.tl::after{top:0}
+.c.tr{top:-1px;right:-1px}.c.tr::before{right:0}.c.tr::after{top:0}
+.c.bl{bottom:-1px;left:-1px}.c.bl::before{left:0}.c.bl::after{bottom:0}
+.c.br{bottom:-1px;right:-1px}.c.br::before{right:0}.c.br::after{bottom:0}
 
 .kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
 .tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px}
@@ -89,6 +93,10 @@ figure{flex:2 1 520px;min-width:0;margin:0;display:flex;flex-direction:column}
 .fig-foot{display:flex;align-items:center;gap:14px;padding:12px 16px;border-top:1px solid var(--divider)}
 .ticks{display:flex;gap:3px;flex:1}.ticks span{flex:1;height:6px;background:var(--n200)}
 .iter{font-family:var(--fh);font-weight:600;font-size:14px;letter-spacing:.04em;white-space:nowrap}
+.spec-fig{flex:none}
+.spec-plot{position:relative;width:100%;height:300px}
+.spec-plot canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.spec-cap{margin:0;padding:10px 16px;border-top:1px solid var(--divider);font-size:13px;line-height:1.6;color:var(--n800);text-wrap:pretty}
 
 aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
 .card{display:flex;flex-direction:column;gap:12px;padding:18px}
@@ -147,8 +155,7 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
     <div class="action-text">
       <div class="action-top">
         <span class="kicker">操作</span>
-        <span class="muted" id="errorMsg" hidden></span>
-      </div>
+        <span class="muted" id="errorMsg" hidden></span>      </div>
       <div class="action-title" id="actionTitle"></div>
       <p class="action-body" id="actionBody"></p>
     </div>
@@ -182,7 +189,7 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
             <button type="button" class="btn btn-primary bp" id="runBtn" style="padding:10px 18px;font-size:15px">
               <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-              使用 demo 圖片
+              使用 demo 光譜
             </button>
           </div>
         </div>
@@ -229,6 +236,16 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
       </div>
     </aside>
   </section>
+
+  <figure class="bp spec-fig">
+    <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+    <div class="fig-head"><span class="kicker">Fig. 2 — 輸入資料：每個墨水區塊的反射率光譜</span><span class="tag tag-neutral">模擬資料</span></div>
+    <div class="spec-plot" id="specWrap">
+      <canvas id="spec"></canvas>
+      <div class="overlay" id="specIdle"><span class="muted">執行分析後顯示</span></div>
+    </div>
+    <p class="spec-cap" id="specCap"></p>
+  </figure>
 </main>
 
 <script>
@@ -250,7 +267,7 @@ const STEPS = [
 ];
 const METRIC_NAMES = { SI: '輪廓係數 Silhouette', NMI: '標準化互資訊', HI: '同質性 Homogeneity', CI: '完整性 Completeness' };
 const ACTIONS = {
-  idle: ['開始分析', '執行 demo pipeline：特徵擷取 → t-SNE 降維 → KMeans 分群。'],
+  idle: ['開始分析', '執行 demo pipeline：讀入模擬的墨水反射率光譜 → t-SNE 降維 → KMeans 分群。'],
   loading: ['取像與前處理中', '模擬 HySpex 取像、輻射校正與反射率正規化，接著擷取墨水光譜。'],
   tsne: ['t-SNE 收斂中', '所有點都是灰色——此時系統不知道任何來源標籤，只看樣本自己會不會分群。'],
   tsneDone: ['收斂完成', '畫面已分出群聚。揭曉真實來源，並播放 KMeans 在這個結果上的疊代過程。'],
@@ -290,7 +307,7 @@ function render() {
     : phase === 'tsneDone' ? `<b>下一步 · ${next.num} ${next.title}</b>　${next.desc}`
     : phase === 'done' ? '<b>8 個步驟全部完成</b>'
     : phase === 'error' ? '<b>執行中斷</b>'
-    : '<b>尚未開始</b>　按下「使用 demo 圖片」後會依序跑完 8 個步驟';
+    : '<b>尚未開始</b>　按下「使用 demo 光譜」後會依序跑完 8 個步驟';
 
   const [t, b] = ACTIONS[phase];
   $('actionTitle').textContent = t;
@@ -352,6 +369,63 @@ function render() {
       ? `<b>判定 k = ${ks.k}</b>：分數明顯高過其他 k（領先 ${lead}），群聚結構清楚，文件裡很可能不只一種來源。`
       : `<b>群聚結構不明顯</b>：分數沒有明顯高峰（只領先 ${lead}），暫以 k = ${ks.k} 作圖，是否混用需要人工判讀。`;
   }
+
+  drawSpectra();
+}
+
+// ---- Fig. 2 光譜曲線 ----
+function drawSpectra() {
+  const cv = $('spec'), box = $('specWrap');
+  const dpr = window.devicePixelRatio || 1, W = box.clientWidth, H = box.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const has = !!(data && data.spectra);
+  $('specIdle').hidden = has;
+  if (!has) { $('specCap').textContent = '每條曲線是一個墨水區塊在 400–1000 nm 的反射率，執行分析後顯示。'; return; }
+
+  const revealed = S.phase === 'kmeans' || S.phase === 'done';
+  const wl = data.wavelengths, padL = 46, padR = 16, padT = 28, padB = 34;
+  const sx = x => padL + (x - 400) / 600 * (W - padL - padR);
+  const sy = y => H - padB - y * (H - padT - padB);
+
+  ctx.font = `11px ${cssVar('--fb')}`;
+  ctx.fillStyle = cssVar('--n700');
+  ctx.strokeStyle = cssVar('--n200');
+  ctx.lineWidth = 1;
+  for (let x = 400; x <= 1000; x += 100) {
+    const X = Math.round(sx(x)) + .5;
+    ctx.beginPath(); ctx.moveTo(X, padT); ctx.lineTo(X, H - padB); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillText(x, X, H - padB + 15);
+  }
+  for (let i = 0; i <= 5; i++) {
+    const y = i / 5, Y = Math.round(sy(y)) + .5;
+    ctx.beginPath(); ctx.moveTo(padL, Y); ctx.lineTo(W - padR, Y); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText(y.toFixed(1), padL - 6, Y + 4);
+  }
+  ctx.textAlign = 'right'; ctx.fillText('波長 (nm)', W - padR, H - 4);
+  ctx.textAlign = 'left'; ctx.fillText('反射率', 8, 14);
+
+  // 揭曉後把竄改的曲線畫在最上層
+  const order = data.spectra.map((_, i) => i);
+  if (revealed) order.sort((a, b) => data.true_source[a] - data.true_source[b]);
+  const cols = [cssVar('--a400'), cssVar('--text')], neutral = cssVar('--n500');
+  order.forEach(i => {
+    ctx.beginPath();
+    data.spectra[i].forEach((v, j) => j ? ctx.lineTo(sx(wl[j]), sy(v)) : ctx.moveTo(sx(wl[j]), sy(v)));
+    ctx.strokeStyle = revealed ? cols[data.true_source[i]] : neutral;
+    ctx.globalAlpha = revealed ? .85 : .45;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+
+  const n = data.spectra.length, nSus = data.true_source.filter(s => s === 1).length;
+  $('specCap').textContent = revealed
+    ? `深色是疑似竄改插入的 ${nSus} 條。兩種墨水在可見光段（400–650 nm）幾乎重疊，差在約 700–750 nm 往上翻的位置——這段是近紅外，人眼和一般相機都看不到，所以要用高光譜相機。`
+    : `共 ${n} 條光譜，每條是一個墨水區塊在 400–1000 nm 的反射率。肉眼幾乎分不出來；系統不看任何標籤，直接拿這些曲線做 t-SNE 降維。`;
 }
 
 // ---- canvas ----
@@ -555,7 +629,7 @@ $('runBtn').addEventListener('click', run);
 $('rerunBtn').addEventListener('click', run);
 $('revealBtn').addEventListener('click', reveal);
 new ResizeObserver(() => draw(lastFrame)).observe(wrap);
-render();
+new ResizeObserver(drawSpectra).observe($('specWrap'));render();
 draw(lastFrame);
 restore();
 </script>

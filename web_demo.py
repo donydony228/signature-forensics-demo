@@ -1,8 +1,8 @@
-"""模擬「同一份文件裡取樣一批手寫/墨水區塊，用 t-SNE 檢查是否混用了不只一種墨水/筆跡」。
+"""模擬「同一份文件裡取樣一批墨水區塊的反射率光譜，用 t-SNE 檢查是否混用了不只一種墨水」。
 
-流程比照 Forensic Sci Int 311(2020)110194（PCA vs t-SNE 分群品質比較），
-差別是這裡沒有真的簽名資料集（CEDAR 授權不可轉散布，見 .gitignore），
-用 PIL 畫的合成「筆跡」代替，純粹示範 pipeline 的骨架。
+流程比照 Forensic Sci Int 311(2020)110194：光譜直接送進 PCA / t-SNE，再用 KMeans 分群。
+手上沒有 HySpex 拍的真實光譜，所以用仿論文 Fig. 4 形狀的模擬光譜代替（400–1000 nm、186 個波段）。
+拿到真實光譜後，只要把 DOC_X 換成「每列一個樣本、每欄一個波長」的反射率矩陣，後面不用改。
 
 這是論文原本的用法，不是「拿一張新圖跟已知嫌疑人比對」：
 一份文件裡的樣本全部一起丟進 PCA/t-SNE，不用任何身分標籤，
@@ -31,14 +31,12 @@ from pathlib import Path
 
 import numpy as np
 from flask import Flask, jsonify, send_from_directory
-from PIL import Image, ImageDraw
-from skimage.feature import hog
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, FastICA
 from sklearn.manifold import MDS, TSNE, Isomap, SpectralEmbedding
 from sklearn.metrics import completeness_score, homogeneity_score, normalized_mutual_info_score, silhouette_score
 
-IMG_SIZE = (256, 128)  # 寬, 高
+WAVELENGTHS = np.linspace(400, 1000, 186)  # nm，對應 HySpex VNIR-1800 的 186 個波段
 
 # 模擬一份文件：大部分區塊出自同一來源，少數混入另一來源（竄改/插入）。
 DOC_N_NORMAL = 28
@@ -50,35 +48,26 @@ DOC_SEED = 0
 TSNE_SNAPSHOT_ITERS = (250, 265, 280, 300, 325, 350, 450, 600, 800, 1000)  # sklearn 要求 max_iter >= 250
 
 
-# 竄改來源的振幅與頻率比原本來源大 20%；同一來源每個樣本也各有變異（真實筆跡/墨水不會每次一模一樣）。
-# 差異刻意做小：太好分的話每種降維方法都滿分，方法比較就沒意義。
-SOURCE_SHIFT = 0.2
-WITHIN_VAR = 0.5
+# 兩種藍墨水：可見光段都在 450 nm 附近有個反射峰，差在近紅外「往上翻」的吸收邊緣位置（705 vs 740 nm）。
+# 差距刻意做小（35 nm）：太好分的話每種降維方法都滿分，方法比較就沒意義。
+INKS = {0: {"edge": 705, "peak": 0.42}, 1: {"edge": 740, "peak": 0.36}}
+EDGE_JITTER_NM = 4   # 同一支筆不同位置，吸收邊緣會飄
+PAPER_MIX_MAX = 0.15  # 墨水筆劃很細，像素裡會混到紙張，最多 15%
+THICKNESS_SD = 0.05   # 墨水厚薄造成的整體亮度變化
+PAPER_REFLECTANCE = 0.86
+NOISE_SD = 0.012
 
 
-def make_signature_image(source_id: int, rng: np.random.Generator) -> Image.Image:
-    """畫一條波浪線當作合成筆跡：來源決定基準振幅/頻率，rng 決定這個樣本自己的變異。"""
-    base = np.random.default_rng(0)
-    scale = 1 + SOURCE_SHIFT * source_id
-    amplitude = (15 + base.uniform(0, 20)) * scale * (1 + rng.normal(0, 0.1 * WITHIN_VAR))
-    freq = (0.05 + base.uniform(0, 0.1)) * scale * (1 + rng.normal(0, 0.04 * WITHIN_VAR))
-    phase = base.uniform(0, 6.28) + rng.normal(0, 0.5 * WITHIN_VAR)
-    offset = rng.normal(0, 8 * WITHIN_VAR)
-
-    img = Image.new("L", IMG_SIZE, color=255)
-    draw = ImageDraw.Draw(img)
-    xs = np.arange(20, IMG_SIZE[0] - 20)
-    jitter = rng.normal(scale=3.0, size=xs.shape)
-    ys = IMG_SIZE[1] / 2 + offset + amplitude * np.sin(freq * xs + phase) + jitter
-    points = list(zip(xs.tolist(), ys.tolist()))
-    draw.line(points, fill=0, width=3)
-    return img
-
-
-def extract_features(img: Image.Image) -> np.ndarray:
-    img = img.convert("L").resize(IMG_SIZE)
-    arr = np.asarray(img, dtype=float) / 255.0
-    return hog(arr, orientations=9, pixels_per_cell=(8, 8), cells_per_block=(2, 2), feature_vector=True)
+def make_ink_spectrum(source_id: int, rng: np.random.Generator) -> np.ndarray:
+    """一個墨水像素的反射率光譜（0–1），形狀仿論文 Fig. 4 的藍筆：450 nm 反射峰 + 近紅外吸收邊緣往上翻。"""
+    ink = INKS[source_id]
+    edge = ink["edge"] + rng.normal(0, EDGE_JITTER_NM)
+    thickness = rng.normal(1, THICKNESS_SD)
+    paper = rng.uniform(0, PAPER_MIX_MAX)
+    wl = WAVELENGTHS
+    pure = 0.08 + ink["peak"] * np.exp(-((wl - 450) / 38) ** 2) + 0.74 / (1 + np.exp(-(wl - edge) / 16))
+    mixed = (1 - paper) * pure * thickness + paper * PAPER_REFLECTANCE
+    return mixed + rng.normal(0, NOISE_SD, wl.size)
 
 
 def build_document_sample():
@@ -87,8 +76,8 @@ def build_document_sample():
     sources = np.array([0] * DOC_N_NORMAL + [1] * DOC_N_SUSPICIOUS)
     np.random.default_rng(DOC_SEED + 1).shuffle(sources)  # 打散順序，不要正常/竄改連續排列
 
-    feats = np.array([extract_features(make_signature_image(int(s), rng)) for s in sources])
-    return feats, sources
+    spectra = np.array([make_ink_spectrum(int(s), rng) for s in sources])
+    return spectra, sources
 
 
 DOC_X, DOC_TRUE_SOURCE = build_document_sample()
@@ -124,10 +113,10 @@ def cluster_metrics(embedding: np.ndarray, y: np.ndarray, k: int):
     return metrics, pred
 
 
-# 這批資料分得太乾淨，KMeans 預設的 k-means++ 初始化常常 1~2 步就收斂，動畫沒東西好看。
-# 改用 random 初始化（一樣是 sklearn 內建、真的初始化方式，只是通常收斂比較慢），
-# random_state=10 是試過幾個種子裡收斂步數較多、而且最後分群結果跟預設一致的一個。
-KMEANS_ANIM_SEED = 10
+# 動畫用 random 初始化單跑一次；種子要讓最後結果跟 cluster_metrics（n_init=10）一致。
+# 光譜資料在 t-SNE 上分得很開，試過的種子最多 2 步就收斂；刻意挑爛起點（資料中心附近）
+# 雖然步數變多，但會卡在錯誤的分法、跟指標表格矛盾，所以不採用。
+KMEANS_ANIM_SEED = 2
 
 
 def run_kmeans_trajectory(embedding: np.ndarray, k: int):
@@ -214,6 +203,8 @@ def analyze_document():
         frames=[frame.tolist() for frame in tsne_frames],
         iters=list(TSNE_SNAPSHOT_ITERS),
         true_source=DOC_TRUE_SOURCE.tolist(),
+        wavelengths=WAVELENGTHS.round(1).tolist(),
+        spectra=DOC_X.round(4).tolist(),
         tsne_kmeans_labels=tsne_kmeans_labels.tolist(),
         kmeans_frames=kmeans_frames,
         k_selection=k_selection,
@@ -233,7 +224,7 @@ def check():
 
     assert k_selection["k"] == 2 and k_selection["clear_peak"], f"混用文件應判定 k=2 且高峰明顯：{k_selection}"
     single_rng = np.random.default_rng(5)
-    single_doc = np.array([extract_features(make_signature_image(0, single_rng)) for _ in range(len(DOC_X))])
+    single_doc = np.array([make_ink_spectrum(0, single_rng) for _ in range(len(DOC_X))])
     assert not choose_k(single_doc)["clear_peak"], "單一來源文件不該被標成群聚結構明顯"
 
     k = k_selection["k"]
