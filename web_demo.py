@@ -113,18 +113,30 @@ def cluster_metrics(embedding: np.ndarray, y: np.ndarray, k: int):
     return metrics, pred
 
 
-# 動畫用 random 初始化單跑一次；種子要讓最後結果跟 cluster_metrics（n_init=10）一致。
-# 光譜資料在 t-SNE 上分得很開，試過的種子最多 2 步就收斂；刻意挑爛起點（資料中心附近）
-# 雖然步數變多，但會卡在錯誤的分法、跟指標表格矛盾，所以不採用。
-KMEANS_ANIM_SEED = 2
+# KMeans 動畫：自己跑 Lloyd's algorithm 並記下每個階段，而不是用 sklearn 只拿最後結果。
+# 每一輪拆成兩個階段——「更新群中心」（群中心移動、歸屬不變）與「重新分群」（群中心不動、歸屬改變），
+# 這樣畫面才看得到過程。起點是隨機挑 k 個資料點（跟 sklearn 的 init="random" 同一種做法）。
+# 光譜資料在 t-SNE 上分得很開，隨機起點最多 3 輪就收斂；種子是在最後結果跟 cluster_metrics
+# （n_init=10）一致的前提下挑到輪數最多的。刻意挑更爛的起點會卡在錯誤的分法，跟指標表格矛盾，所以不用。
+KMEANS_ANIM_SEED = 139
 
 
 def run_kmeans_trajectory(embedding: np.ndarray, k: int):
-    full = KMeans(n_clusters=k, n_init=1, init="random", max_iter=100, random_state=KMEANS_ANIM_SEED).fit(embedding)
-    frames = []
-    for m in range(1, full.n_iter_ + 1):
-        km = KMeans(n_clusters=k, n_init=1, init="random", max_iter=m, random_state=KMEANS_ANIM_SEED).fit(embedding)
-        frames.append({"labels": km.labels_.tolist(), "centers": km.cluster_centers_.tolist()})
+    rng = np.random.default_rng(KMEANS_ANIM_SEED)
+    centers = embedding[rng.choice(len(embedding), k, replace=False)].copy()
+    rounds, prev = [], None
+    for _ in range(100):
+        labels = np.argmin(((embedding[:, None] - centers[None]) ** 2).sum(-1), axis=1)
+        rounds.append((centers.copy(), labels))
+        if prev is not None and (labels == prev).all():
+            break
+        prev = labels
+        centers = np.array([embedding[labels == j].mean(0) if (labels == j).any() else centers[j] for j in range(k)])
+
+    frames = [{"labels": rounds[0][1].tolist(), "centers": rounds[0][0].tolist()}]
+    for (c_new, _), (_, l_prev), (_, l_new) in zip(rounds[1:], rounds[:-1], rounds[1:]):
+        frames.append({"labels": l_prev.tolist(), "centers": c_new.tolist()})  # 更新群中心
+        frames.append({"labels": l_new.tolist(), "centers": c_new.tolist()})    # 重新分群
     return frames
 
 
@@ -163,8 +175,9 @@ DR_METHODS = [
 
 
 def compare_methods(X: np.ndarray, y: np.ndarray):
-    """每種方法都降到 2 維再用 KMeans 分成 choose_k 判定的群數。排名只看 SI：SI 不需要真實來源，真實案件也算得出來；
-    NMI/HI/CI 需要答案，只拿來在 demo 裡驗證自動挑的對不對。"""
+    """每種方法都降到 2 維再用 KMeans 分成 choose_k 判定的群數，並排回傳、不排名也不挑第一名
+    （SI 衡量群緊不緊、不衡量分得對不對，拿它挑方法會挑出「很緊但分錯」的）。
+    SI 不需要真實來源，真實案件也算得出來；NMI/HI/CI 需要答案，只在 demo 裡對照分得對不對。"""
     k = choose_k(X)["k"]
     results = []
     for name, kind, make in DR_METHODS:
@@ -178,8 +191,7 @@ def compare_methods(X: np.ndarray, y: np.ndarray):
             "name": name, "kind": kind, "seconds": seconds,
             "points": embedding.tolist(), "kmeans_labels": labels.tolist(), "metrics": metrics,
         })
-    best = max(range(len(results)), key=lambda i: results[i]["metrics"]["SI"])
-    return results, best, k
+    return results, k
 
 
 app = Flask(__name__, static_folder=None)
@@ -215,8 +227,8 @@ def analyze_document():
 
 @app.get("/api/compare-methods")
 def compare_methods_api():
-    results, best, k = compare_methods(DOC_X, DOC_TRUE_SOURCE)
-    return jsonify(methods=results, best=best, k=k, true_source=DOC_TRUE_SOURCE.tolist())
+    results, k = compare_methods(DOC_X, DOC_TRUE_SOURCE)
+    return jsonify(methods=results, k=k, true_source=DOC_TRUE_SOURCE.tolist())
 
 
 def check():
@@ -237,15 +249,14 @@ def check():
     assert all(len(f["labels"]) == len(DOC_X) and len(f["centers"]) == k for f in kmeans_frames)
     assert normalized_mutual_info_score(kmeans_frames[-1]["labels"], tsne_kmeans_labels) == 1.0, \
         "KMeans 動畫最後一幀跟表格用的分群結果對不起來"
-    results, best, _ = compare_methods(DOC_X, DOC_TRUE_SOURCE)
+    results, _ = compare_methods(DOC_X, DOC_TRUE_SOURCE)
     assert [r["name"] for r in results] == [m[0] for m in DR_METHODS]
     assert all(len(r["points"]) == len(DOC_X) for r in results)
-    assert results[best]["metrics"]["SI"] == max(r["metrics"]["SI"] for r in results)
     assert len({round(r["metrics"]["NMI"], 2) for r in results}) > 1, "每種方法分數都一樣，比較沒有意義，資料可能太好分"
 
     print("self-check ok:", {"PCA": pca_metrics, "t-SNE": tsne_metrics, "kmeans_iters": len(kmeans_frames)})
-    for i, r in enumerate(results):
-        print(f"  {'*' if i == best else ' '} {r['name']:9s} SI {r['metrics']['SI']:.2f}  NMI {r['metrics']['NMI']:.2f}  {r['seconds']:.3f}s")
+    for r in results:
+        print(f"    {r['name']:9s} SI {r['metrics']['SI']:.2f}  NMI {r['metrics']['NMI']:.2f}  {r['seconds']:.3f}s")
 
 
 if __name__ == "__main__":

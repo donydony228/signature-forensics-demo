@@ -55,15 +55,15 @@ main{max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-dir
 .intro p{margin:0;font-size:15px;line-height:1.7;color:var(--n800);text-wrap:pretty}
 
 /* 步驟列：兩組並排、只留編號與標題，捲到收斂圖時黏在畫面頂端，看動畫時也看得到步驟推進 */
-.groups{position:sticky;top:0;z-index:5;background:var(--bg);display:grid;grid-template-columns:minmax(0,3fr) minmax(0,5fr);gap:6px 20px;margin:0 -32px;padding:10px 32px 8px;border-bottom:1px solid var(--divider)}
+.groups{position:sticky;top:0;z-index:5;background:var(--bg);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:6px 20px;margin:0 -32px;padding:10px 32px 8px;border-bottom:1px solid var(--divider)}
 @media (max-width:900px){.groups{grid-template-columns:minmax(0,1fr)}}
 .group{display:flex;flex-direction:column;gap:6px;min-width:0}
 .group-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .group-head h4{font-size:15px}
 .group-count{margin-left:auto;font-family:var(--fh);font-weight:600;font-size:13px;color:var(--a800)}
-.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
-#swSteps{grid-template-columns:repeat(5,minmax(0,1fr))}
-@media (max-width:480px){.steps,#swSteps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.steps{display:grid;grid-template-columns:minmax(0,1fr)}
+#swSteps{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:480px){#swSteps{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .step{padding:6px 8px;display:flex;flex-direction:column;gap:1px;border-top:4px solid var(--n200);margin-right:2px;min-width:0}
 .step.done{border-top-color:var(--accent)}
 .step.active{border-top-color:var(--a700);background:var(--a100)}
@@ -140,7 +140,7 @@ aside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:24px}
 
   <section class="groups">
     <div class="group">
-      <div class="group-head"><span class="tag tag-accent">硬體</span><h4>取像與校正 · HySpex VNIR-1800 + HySpex RAD</h4><span class="group-count" id="hwCount"></span></div>
+      <div class="group-head"><span class="tag tag-accent">硬體</span><h4>HySpex VNIR-1800 + RAD 輸出</h4><span class="group-count" id="hwCount"></span></div>
       <div class="steps" id="hwSteps"></div>
     </div>
     <div class="group">
@@ -256,19 +256,16 @@ const SHOW_GRID = true;
 const SHOW_HULLS = true;     // KMeans 每步的半透明群色塊
 
 const STEPS = [
-  { num: '01', title: '高光譜取像', desc: '推掃式相機掃描文件，400–1000 nm 共 186 個波段' },
-  { num: '02', title: '取像環境控制', desc: '文件置於移動載台，兩盞鹵素燈 45° 照明，參考標準板同場拍攝' },
-  { num: '03', title: '輻射校正', desc: 'HySpex RAD 將原始影像轉為絕對輻射亮度，修正非均勻性與暗電流' },
-  { num: '04', title: '反射率正規化', desc: '以已知反射率的參考標準板換算每個像素的絕對反射率' },
-  { num: '05', title: '墨水光譜擷取', desc: '從各墨水區塊取出光譜向量，整批一起分析' },
-  { num: '06', title: 't-SNE 降維', desc: '把高維光譜壓到 2 維，保留非線性相似關係' },
-  { num: '07', title: 'KMeans 分群', desc: '在 2 維嵌入上疊代分群，找出異常來源' },
-  { num: '08', title: '分群品質評估', desc: 'SI / NMI / HI / CI 四項指標量化結果' },
+  { num: '01', title: '校正後的輻射亮度影像', desc: 'HySpex VNIR-1800 搭配 HySpex RAD 的輸出：絕對輻射亮度影像，400–1000 nm 共 186 個波段（儀器端到此為止）' },
+  { num: '02', title: '墨水光譜擷取', desc: '從各墨水區塊取出光譜向量，整批一起分析' },
+  { num: '03', title: 't-SNE 降維', desc: '把高維光譜壓到 2 維，保留非線性相似關係' },
+  { num: '04', title: 'KMeans 分群', desc: '在 2 維嵌入上疊代分群，找出異常來源' },
+  { num: '05', title: '分群品質評估', desc: 'SI / NMI / HI / CI 四項指標量化結果' },
 ];
 const METRIC_NAMES = { SI: '輪廓係數 Silhouette', NMI: '標準化互資訊', HI: '同質性 Homogeneity', CI: '完整性 Completeness' };
 const ACTIONS = {
   idle: ['開始分析', '執行 demo pipeline：讀入模擬的墨水反射率光譜 → t-SNE 降維 → KMeans 分群。'],
-  loading: ['取像與前處理中', '模擬 HySpex 取像、輻射校正與反射率正規化，接著擷取墨水光譜。'],
+  loading: ['讀入光譜資料中', '讀入 HySpex 輸出的影像（此處為模擬資料），再擷取各墨水區塊的光譜。'],
   tsne: ['t-SNE 收斂中', '所有點都是灰色——此時系統不知道任何來源標籤，只看樣本自己會不會分群。'],
   tsneDone: ['收斂完成', '畫面已分出群聚。揭曉真實來源，並播放 KMeans 在這個結果上的疊代過程。'],
   kmeans: ['KMeans 疊代中', '顏色是真實來源；形狀是 KMeans 目前的分群結果。'],
@@ -289,25 +286,25 @@ function set(patch) { Object.assign(S, patch); render(); }
 // ---- UI ----
 function render() {
   const { phase, seg, kstep, pre } = S;
-  const doneN = { idle: 0, error: 0, loading: pre, tsne: 5, tsneDone: 6, kmeans: 6, done: 8 }[phase];
-  const activeI = { loading: pre, tsne: 5, kmeans: 6 }[phase] ?? -1;
+  const doneN = { idle: 0, error: 0, loading: pre, tsne: 2, tsneDone: 3, kmeans: 3, done: 5 }[phase];
+  const activeI = { loading: pre, tsne: 2, kmeans: 3 }[phase] ?? -1;
   const stepHtml = (s, i) => {
     const done = i < doneN, active = i === activeI;
     const label = s.num + (done ? ' · 完成' : active ? ' · 進行中' : '');
     return `<div class="step${done ? ' done' : ''}${active ? ' active' : ''}" title="${s.desc}"><span class="step-num">${label}</span><span class="step-title">${s.title}</span></div>`;
   };
-  // 01–03 由 HySpex 相機與 HySpex RAD 完成；04 反射率正規化起由分析軟體負責（論文中是研究者自己算的）
-  $('hwSteps').innerHTML = STEPS.slice(0, 3).map((s, i) => stepHtml(s, i)).join('');
-  $('swSteps').innerHTML = STEPS.slice(3).map((s, i) => stepHtml(s, i + 3)).join('');
-  $('hwCount').textContent = `完成 ${Math.min(doneN, 3)} / 3`;
-  $('swCount').textContent = `完成 ${Math.max(doneN - 3, 0)} / 5`;
-  const cur = STEPS[activeI], next = STEPS[6];
+  // 01 是儀器端的輸出（HySpex + HySpex RAD）；02 起都是分析軟體負責，重點在軟體
+  $('hwSteps').innerHTML = STEPS.slice(0, 1).map((s, i) => stepHtml(s, i)).join('');
+  $('swSteps').innerHTML = STEPS.slice(1).map((s, i) => stepHtml(s, i + 1)).join('');
+  $('hwCount').textContent = `完成 ${Math.min(doneN, 1)} / 1`;
+  $('swCount').textContent = `完成 ${Math.max(doneN - 1, 0)} / 4`;
+  const cur = STEPS[activeI], next = STEPS[3];
   $('stepNow').innerHTML =
     cur ? `<b>進行中 · ${cur.num} ${cur.title}</b>　${cur.desc}`
     : phase === 'tsneDone' ? `<b>下一步 · ${next.num} ${next.title}</b>　${next.desc}`
-    : phase === 'done' ? '<b>8 個步驟全部完成</b>'
+    : phase === 'done' ? '<b>5 個步驟全部完成</b>'
     : phase === 'error' ? '<b>執行中斷</b>'
-    : '<b>尚未開始</b>　按下「使用 demo 光譜」後會依序跑完 8 個步驟';
+    : '<b>尚未開始</b>　按下「使用 demo 光譜」後會依序跑完 5 個步驟';
 
   const [t, b] = ACTIONS[phase];
   $('actionTitle').textContent = t;
@@ -320,7 +317,7 @@ function render() {
 
   $('idleOverlay').hidden = phase !== 'idle';
   $('loadingOverlay').hidden = phase !== 'loading';
-  const ps = STEPS[Math.min(pre, 4)];
+  const ps = STEPS[Math.min(pre, 1)];
   $('loadingLabel').textContent = `${ps.num} ${ps.title}…`;
 
   const inK = phase === 'kmeans' || phase === 'done';
@@ -331,8 +328,8 @@ function render() {
   if (phase === 'error') status = '執行失敗';
   if (phase === 'tsne') { status = `收斂中（尚未知道任何來源標籤）· 第 ${seg + 1}/${tN} 段`; iter = `max_iter ${data.iters[seg]} → ${data.iters[seg + 1]}`; }
   if (phase === 'tsneDone') { status = 't-SNE 收斂完成'; iter = `max_iter ${data.iters[data.iters.length - 1]}`; }
-  if (phase === 'kmeans') { status = `KMeans 疊代中 · 第 ${kstep + 1}/${Math.max(kN - 1, 1)} 步`; iter = `KMeans step ${kstep + 1}`; }
-  if (phase === 'done') { status = `KMeans 收斂完成（共 ${kN} 步疊代）`; iter = `KMeans ${kN} steps`; }
+  if (phase === 'kmeans') { status = `KMeans 疊代中 · ${kstep % 2 ? '重新分群' : '更新群中心'}（第 ${kstep + 1}/${Math.max(kN - 1, 1)} 階段）`; iter = `KMeans ${kstep + 1}/${Math.max(kN - 1, 1)}`; }
+  if (phase === 'done') { status = `KMeans 收斂完成（${Math.max(kN - 1, 1)} 個階段）`; iter = `KMeans ${Math.max(kN - 1, 1)} / ${Math.max(kN - 1, 1)}`; }
   $('plotStatus').textContent = status;
   $('iterLabel').textContent = iter;
 
@@ -562,7 +559,7 @@ async function run() {
   saveStage(null);
   data = null; bounds = null; draw({ points: [] });
   set({ phase: 'loading', seg: 0, kstep: 0, pre: 0, error: '' });
-  preTimer = setInterval(() => set({ pre: Math.min(S.pre + 1, 4) }), 600);
+  preTimer = setInterval(() => set({ pre: Math.min(S.pre + 1, 1) }), 600);
   const minWait = new Promise(r => setTimeout(r, 2600));
   try {
     const res = await fetch(DATA_URL);
@@ -611,7 +608,7 @@ function reveal() {
   const tick = ts => {
     if (t0 === null) t0 = ts;
     const t = ease(Math.min((ts - t0) / TRANSITION_MS, 1)), a = K[step].centers, b = K[step + 1].centers;
-    draw({ points: P, colors, shapes: K[step].labels, centers: a.map((c, i) => [c[0] + (b[i][0] - c[0]) * t, c[1] + (b[i][1] - c[1]) * t]) });
+    draw({ points: P, colors, shapes: (t < .5 ? K[step] : K[step + 1]).labels, centers: a.map((c, i) => [c[0] + (b[i][0] - c[0]) * t, c[1] + (b[i][1] - c[1]) * t]) });
     if (t < 1) { raf = requestAnimationFrame(tick); return; }
     step++;
     if (step < K.length - 1) { t0 = null; set({ kstep: step }); raf = requestAnimationFrame(tick); }

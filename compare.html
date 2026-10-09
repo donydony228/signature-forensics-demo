@@ -50,12 +50,11 @@ main{max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-dir
 
 .intro{display:flex;flex-direction:column;gap:12px}
 .intro-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px}
-.intro p{margin:0;font-size:15px;line-height:1.7;color:var(--n800);max-width:80ch;text-wrap:pretty}
+.intro p{margin:0;font-size:15px;line-height:1.7;color:var(--n800);text-wrap:pretty}
 .cgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
 @media (max-width:960px){.cgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:560px){.cgrid{grid-template-columns:minmax(0,1fr)}}
 .cm{display:flex;flex-direction:column}
-.cm.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .cm-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--divider)}
 .cm-name{font-family:var(--fh);font-weight:600;font-size:18px;margin-right:auto}
 .cm-plot{position:relative;width:100%;aspect-ratio:4/3}
@@ -80,14 +79,14 @@ main{max-width:1440px;margin:0 auto;padding:40px 32px 64px;display:flex;flex-dir
   <section class="intro">
     <span class="kicker">方法比較</span>
     <div class="intro-row">
-      <h1>同一批樣本，6 種降維方法誰分得最好？</h1>
+      <h1>同一批樣本，6 種降維方法並排比較</h1>
       <button type="button" class="btn btn-primary bp" id="compareBtn">
         <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         執行方法比較
       </button>
     </div>
-    <p>每種方法都把主畫面那批樣本降到 2 維，再用 KMeans 分群；群數跟主畫面一樣，是系統不看答案自動判定的。<b>自動挑選只看 SI（輪廓係數）</b>——它不需要知道真實來源，真實案件也算得出來。NMI 需要答案，這裡只用來驗證自動挑的對不對。LDA 是監督式方法（要先知道答案才能算），所以不列入。</p>
+    <p>每種方法都把主畫面那批樣本降到 2 維，再用 KMeans 分群；群數跟主畫面一樣，是系統不看答案自動判定的。這裡<b>並排展示、不排名也不挑第一名</b>：主流程固定用 t-SNE，因為它是論文的方法，收斂過程也適合做視覺化。多種方法都分得開時，各方法差別不大，是資料本身好分。SI 不需要答案、真實案件也算得出來；NMI 需要答案，這裡只用來對照分得對不對。LDA 是監督式方法（要先知道答案才能算），所以不列入。</p>
     <div class="legend">
       <span class="li"><i class="dot" style="background:var(--a400)"></i>文件原本來源</span>
       <span class="li"><i class="dot" style="background:var(--text)"></i>疑似竄改插入</span>
@@ -161,7 +160,7 @@ function drawMini(cv, points, colors, shapes) {
 }
 
 function compareOrder() {
-  return cmp.methods.map((_, i) => i).sort((a, b) => cmp.methods[b].metrics.SI - cmp.methods[a].metrics.SI);
+  return cmp.methods.map((_, i) => i);  // 固定順序，不依分數排名
 }
 
 function drawCompare() {
@@ -176,13 +175,13 @@ function drawCompare() {
 }
 
 function renderCompare() {
-  $('compareGrid').innerHTML = compareOrder().map((i, rank) => {
-    const m = cmp.methods[i], best = i === cmp.best;
-    return `<div class="cm bp${best ? ' best' : ''}">
-      <div class="cm-head"><span class="muted">#${rank + 1}</span><span class="cm-name">${m.name}</span><span class="tag tag-neutral">${m.kind}</span>${best ? '<span class="tag tag-accent">自動選出</span>' : ''}</div>
+  $('compareGrid').innerHTML = compareOrder().map(i => {
+    const m = cmp.methods[i];
+    return `<div class="cm bp">
+      <div class="cm-head"><span class="cm-name">${m.name}</span><span class="tag tag-neutral">${m.kind}</span></div>
       <div class="cm-plot"><canvas></canvas></div>
       <div class="cm-foot">
-        <div><span class="muted">SI · 排名依據</span><b>${m.metrics.SI.toFixed(2)}</b></div>
+        <div><span class="muted">SI · 不需答案</span><b>${m.metrics.SI.toFixed(2)}</b></div>
         <div><span class="muted">NMI · 對答案</span><b>${m.metrics.NMI.toFixed(2)}</b></div>
         <div><span class="muted">耗時</span><b>${(m.seconds * 1000).toFixed(0)} ms</b></div>
       </div>
@@ -203,8 +202,8 @@ async function runCompare() {
     $('compareBtn').disabled = false;
     return;
   }
-  const b = cmp.methods[cmp.best];
-  $('compareStatus').textContent = `自動選出 ${b.name}（SI 最高，${b.metrics.SI.toFixed(2)}）；對答案的 NMI 為 ${b.metrics.NMI.toFixed(2)}。`;
+  const ok = cmp.methods.filter(m => m.metrics.NMI >= 0.9).map(m => m.name);
+  $('compareStatus').textContent = `共 ${cmp.methods.length} 種方法；與真實來源一致（NMI ≥ 0.9）的有 ${ok.length} 種：${ok.join('、') || '無'}。`;
   $('compareBtn').disabled = false;
   renderCompare();
 }
